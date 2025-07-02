@@ -4,15 +4,16 @@ import pandas as pd
 import mplfinance as mpf
 import ta
 import telegram
-import os # Untuk mengambil secrets
+import os
+import pytz
+from datetime import datetime
 
 # --- KONFIGURASI ---
-# Mengambil token dan chat id dari GitHub Secrets
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
-# (Seluruh fungsi analyze_indicators dan determine_final_signal tetap sama...)
+# --- FUNGSI ANALISIS (Sama seperti sebelumnya) ---
 def analyze_indicators(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -79,29 +80,43 @@ def run_analysis():
     final_signal = determine_final_signal(indicator_analysis)
     df_for_plot = df.tail(24)
 
+    # --- PENINGKATAN VISUAL ALA TRADINGVIEW ---
+    # 1. Tentukan warna kustom: merah untuk turun, hijau untuk naik
+    mc = mpf.make_marketcolors(up='green', down='red', 
+                               wick={'up':'green','down':'red'},
+                               volume={'up':'green','down':'red'})
+    # 2. Buat gaya kustom dengan warna dan latar belakang yang diinginkan
+    s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds')
+
+    # 3. Pisahkan histogram MACD menjadi positif (hijau) dan negatif (merah)
+    macd_hist_positive = df_for_plot['macd_hist'].where(df_for_plot['macd_hist'] >= 0, 0)
+    macd_hist_negative = df_for_plot['macd_hist'].where(df_for_plot['macd_hist'] < 0, 0)
+
     macd_plots = [
         mpf.make_addplot(df_for_plot['macd'], panel=2, color='blue', ylabel='MACD'),
         mpf.make_addplot(df_for_plot['macd_signal'], panel=2, color='orange'),
-        mpf.make_addplot(df_for_plot['macd_hist'], type='bar', panel=2, color='gray', alpha=0.5)
+        mpf.make_addplot(macd_hist_positive, type='bar', panel=2, color='green', alpha=0.7),
+        mpf.make_addplot(macd_hist_negative, type='bar', panel=2, color='red', alpha=0.7)
     ]
     rsi_plot = mpf.make_addplot(df_for_plot['rsi'], panel=1, color='purple', ylabel='RSI')
     extra_plots = [rsi_plot] + macd_plots
 
     harga_terkini = df['close'].iloc[-1]
+    waktu_sekarang = datetime.now(pytz.timezone('Asia/Jakarta')).strftime('%d %b %Y, %H:%M WIB')
 
-    # --- PERBAIKAN KODE DI SINI ---
     mpf.plot(
-        df_for_plot, type='candle', style='nightclouds', title=f'Analisis Detail {PAIR} - {TIMEFRAME}',
+        df_for_plot, type='candle', style=s, # Gunakan gaya kustom 's'
+        title=f'Analisis Detail {PAIR} - {TIMEFRAME}',
         ylabel='Harga (USDT)', volume=True, mav=(9, 26), addplot=extra_plots,
         panel_ratios=(8, 3, 3), figscale=2.0,
-        hlines=dict(hlines=[harga_terkini], colors=['w'], linestyle='-.', alpha=0.5),
-        savefig='btc_analysis_ultimate.png' # <- Perintah savefig dipindahkan ke sini
+        hlines=dict(hlines=[harga_terkini], colors=['w'], linestyle='-.', alpha=0.5)
     )
-    # mpf.savefig('btc_analysis_ultimate.png') <- Baris yang salah ini dihapus
+    mpf.savefig('btc_analysis_ultimate.png')
 
+    # --- PENINGKATAN CAPTION ---
     caption = (
         f"📊 **Analisis Teknikal Ultimate: {PAIR} | {TIMEFRAME}**\n"
-        f"*(Harga Terkini: ${harga_terkini:,.2f})*\n\n"
+        f"*(Harga: ${harga_terkini:,.2f} pada {waktu_sekarang})*\n\n"
         f"**Keterangan Indikator:**\n"
         f"1. **Moving Average**: {indicator_analysis['ma']}\n"
         f"2. **RSI**: {indicator_analysis['rsi']}\n"
