@@ -89,13 +89,15 @@ def run_analysis():
 
     harga_terkini = df['close'].iloc[-1]
 
+    # --- PERBAIKAN KODE DI SINI ---
     mpf.plot(
         df_for_plot, type='candle', style='nightclouds', title=f'Analisis Detail {PAIR} - {TIMEFRAME}',
         ylabel='Harga (USDT)', volume=True, mav=(9, 26), addplot=extra_plots,
         panel_ratios=(8, 3, 3), figscale=2.0,
-        hlines=dict(hlines=[harga_terkini], colors=['w'], linestyle='-.', alpha=0.5)
+        hlines=dict(hlines=[harga_terkini], colors=['w'], linestyle='-.', alpha=0.5),
+        savefig='btc_analysis_ultimate.png' # <- Perintah savefig dipindahkan ke sini
     )
-    mpf.savefig('btc_analysis_ultimate.png')
+    # mpf.savefig('btc_analysis_ultimate.png') <- Baris yang salah ini dihapus
 
     caption = (
         f"📊 **Analisis Teknikal Ultimate: {PAIR} | {TIMEFRAME}**\n"
