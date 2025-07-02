@@ -61,7 +61,7 @@ def determine_final_signal(analysis):
 # --- FUNGSI UTAMA ---
 def run_analysis():
     PAIR = 'BTC/USDT'
-    TIMEFRAME = '2h'
+    TIMEFRAME = '4h' # <-- DIUBAH SESUAI PERMINTAAN
     exchange = ccxt.kucoin()
     ohlcv = exchange.fetch_ohlcv(PAIR, timeframe=TIMEFRAME, limit=200)
     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -81,14 +81,11 @@ def run_analysis():
     df_for_plot = df.tail(24)
 
     # --- PENINGKATAN VISUAL ALA TRADINGVIEW ---
-    # 1. Tentukan warna kustom: merah untuk turun, hijau untuk naik
     mc = mpf.make_marketcolors(up='green', down='red', 
                                wick={'up':'green','down':'red'},
                                volume={'up':'green','down':'red'})
-    # 2. Buat gaya kustom dengan warna dan latar belakang yang diinginkan
     s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds')
 
-    # 3. Pisahkan histogram MACD menjadi positif (hijau) dan negatif (merah)
     macd_hist_positive = df_for_plot['macd_hist'].where(df_for_plot['macd_hist'] >= 0, 0)
     macd_hist_negative = df_for_plot['macd_hist'].where(df_for_plot['macd_hist'] < 0, 0)
 
@@ -105,13 +102,13 @@ def run_analysis():
     waktu_sekarang = datetime.now(pytz.timezone('Asia/Jakarta')).strftime('%d %b %Y, %H:%M WIB')
 
     mpf.plot(
-        df_for_plot, type='candle', style=s, # Gunakan gaya kustom 's'
+        df_for_plot, type='candle', style=s,
         title=f'Analisis Detail {PAIR} - {TIMEFRAME}',
         ylabel='Harga (USDT)', volume=True, mav=(9, 26), addplot=extra_plots,
         panel_ratios=(8, 3, 3), figscale=2.0,
-        hlines=dict(hlines=[harga_terkini], colors=['w'], linestyle='-.', alpha=0.5)
+        hlines=dict(hlines=[harga_terkini], colors=['w'], linestyle='-.', alpha=0.5),
+        savefig='btc_analysis_ultimate.png'
     )
-    mpf.savefig('btc_analysis_ultimate.png')
 
     # --- PENINGKATAN CAPTION ---
     caption = (
