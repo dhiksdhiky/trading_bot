@@ -1,5 +1,5 @@
 # main.py
-# VERSI POWER-USER DENGAN SEMUA FITUR BARU
+# VERSI POWER-USER DENGAN SEMUA FITUR BARU (PERBAIKAN ERROR)
 import os
 import requests
 import ccxt
@@ -9,7 +9,7 @@ import ta
 import pytz
 import json
 from datetime import datetime
-from telegram import Update, ParseMode, Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ParseMode, Bot, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
 from replit import db # Menggunakan database bawaan Replit
 
@@ -49,7 +49,7 @@ def keep_alive():
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
-# --- FUNGSI HELPER (Analisis, Sinyal, dll - tidak berubah) ---
+# --- FUNGSI HELPER (Analisis, Sinyal, dll) ---
 def get_market_sentiment(symbol: str):
     try:
         url = f'https://min-api.cryptocompare.com/data/pricemultifull?fsyms={symbol.upper()}&tsyms=USDT&api_key={CRYPTOCOMPARE_API_KEY}'
@@ -67,6 +67,7 @@ def get_market_sentiment(symbol: str):
         return {"status": "error", "message": "Gagal memuat sentimen."}
 
 def analyze_indicators(df: pd.DataFrame):
+    # Fungsi ini sekarang aman karena kita sudah memastikan df memiliki >= 2 baris
     last = df.iloc[-1]
     prev = df.iloc[-2]
     analysis = {}
@@ -109,9 +110,12 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     df['macd_signal'] = macd.macd_signal()
     df['macd_hist'] = macd.macd_diff()
     df.dropna(inplace=True)
-    if df.empty: return None, None, None
+    
+    # PERBAIKAN: Cek panjang DataFrame sebelum analisis
+    if len(df) < 2:
+        return None, "Gagal menganalisis, data tidak cukup setelah diproses.", None
 
-    indicator_analysis = analyze_indicators(df.iloc[:-1].append(df.iloc[-1])) # fix for single row df
+    indicator_analysis = analyze_indicators(df)
     symbol = pair.split('/')[0]
     sentiment_analysis = get_market_sentiment(symbol)
     final_signal = determine_final_signal(indicator_analysis, sentiment_analysis)
@@ -176,7 +180,7 @@ def chart_command(update: Update, context: CallbackContext):
     try:
         filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
         if not filename:
-            context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Gagal menghasilkan analisis untuk `{pair}`.", parse_mode=ParseMode.MARKDOWN)
+            context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Gagal menghasilkan analisis untuk `{pair}`: {caption}", parse_mode=ParseMode.MARKDOWN)
             return
 
         keyboard = [
@@ -215,6 +219,9 @@ def analyze_command(update: Update, context: CallbackContext):
     has_buy = False
     has_sell = False
 
+    # Panggil sentiment sekali saja untuk efisiensi
+    sentiment = get_market_sentiment(symbol) 
+
     for tf in timeframes:
         try:
             ohlcv = exchange.fetch_ohlcv(pair, timeframe=tf, limit=100)
@@ -228,10 +235,13 @@ def analyze_command(update: Update, context: CallbackContext):
             df['macd'] = macd.macd()
             df['macd_signal'] = macd.macd_signal()
             df.dropna(inplace=True)
-            if df.empty: continue
+            
+            # PERBAIKAN: Cek panjang DataFrame sebelum analisis
+            if len(df) < 2:
+                summary_text += f"`{tf}`: ⏳ Data tidak cukup.\n"
+                continue
 
-            analysis = analyze_indicators(df.iloc[:-1].append(df.iloc[-1]))
-            sentiment = get_market_sentiment(symbol) # Hanya panggil sekali
+            analysis = analyze_indicators(df)
             signal = determine_final_signal(analysis, sentiment)
             
             signal_emoji = "➡️"
@@ -244,7 +254,7 @@ def analyze_command(update: Update, context: CallbackContext):
 
             summary_text += f"`{tf}`: {signal_emoji} {analysis['ma']}, RSI {analysis['rsi'].split(' ')[1]}, MACD {analysis['macd'].split(' ')[1]}\n"
         except Exception:
-            summary_text += f"`{tf}`: Gagal dimuat.\n"
+            summary_text += f"`{tf}`: ❌ Gagal dimuat.\n"
     
     final_verdict = "⚠️ **Kesimpulan: NETRAL / KONSOLIDASI**"
     if has_buy and not has_sell:
