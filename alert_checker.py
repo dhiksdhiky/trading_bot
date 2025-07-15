@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 REPLIT_URL = os.environ.get("REPLIT_URL")
 API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-ALERT_THRESHOLD = 3.0 # Ambang batas peringatan dalam persen (%)
+ALERT_THRESHOLD = 2.0 # Ambang batas peringatan dalam persen (%)
 
 def get_watchlist_from_repl():
     """Mengambil data watchlist dari API di Replit."""
