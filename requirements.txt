@@ -4,3 +4,6 @@ pandas
 mplfinance
 ta
 numpy
+requests
+pytz
+Flask
