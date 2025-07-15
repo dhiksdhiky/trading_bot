@@ -1,5 +1,5 @@
 # main.py
-# KODE UNTUK BOT INTERAKTIF (HOSTING 24/7 DI REPLIT) - PERBAIKAN SENTIMEN & ZOOM
+# KODE UNTUK BOT INTERAKTIF (HOSTING 24/7 DI REPLIT) - PERBAIKAN FINAL SENTIMEN & ZOOM
 import os
 import requests
 import ccxt
@@ -34,7 +34,7 @@ def keep_alive():
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
-# --- FUNGSI ANALISIS SENTIMEN (DIPERBARUI DENGAN DEBUGGING) ---
+# --- FUNGSI ANALISIS SENTIMEN (PERBAIKAN FINAL) ---
 def get_market_sentiment(symbol: str):
     print(f"--- Memulai Analisis Sentimen untuk: {symbol} ---")
     if not CRYPTOCOMPARE_API_KEY:
@@ -42,27 +42,44 @@ def get_market_sentiment(symbol: str):
         return {"status": "error", "message": "CryptoCompare API Key tidak dikonfigurasi."}
     
     try:
-        url_social = f'https://min-api.cryptocompare.com/data/v4/social/latest?fsym={symbol.upper()}&api_key={CRYPTOCOMPARE_API_KEY}'
-        print(f"DEBUG: Menghubungi URL: {url_social}")
+        # Langkah 1: Dapatkan ID internal koin dari simbolnya
+        print(f"DEBUG: Mencari ID untuk simbol {symbol}...")
+        all_coins_url = 'https://min-api.cryptocompare.com/data/all/coinlist'
+        all_coins_response = requests.get(all_coins_url)
+        all_coins_response.raise_for_status()
+        all_coins_data = all_coins_response.json()['Data']
         
+        coin_id = None
+        for coin_name, coin_data in all_coins_data.items():
+            if coin_data['Symbol'].upper() == symbol.upper():
+                coin_id = coin_data['Id']
+                print(f"DEBUG: ID untuk {symbol} ditemukan: {coin_id}")
+                break
+        
+        if not coin_id:
+            print(f"DEBUG: Tidak dapat menemukan ID untuk {symbol}.")
+            return {"status": "neutral", "message": f"Sentimen untuk {symbol} tidak ditemukan."}
+
+        # Langkah 2: Gunakan ID untuk mendapatkan data sosial
+        url_social = f'https://min-api.cryptocompare.com/data/social/latest?coinId={coin_id}&api_key={CRYPTOCOMPARE_API_KEY}'
+        print(f"DEBUG: Menghubungi URL data sosial: {url_social}")
         social_response = requests.get(url_social)
         social_response.raise_for_status()
         
         response_json = social_response.json()
-        print(f"DEBUG: Respon mentah dari API: {response_json}")
+        print(f"DEBUG: Respon mentah dari API sosial: {response_json}")
 
         social_data = response_json.get('Data', {})
-        points = social_data.get('Points', 0) # Menggunakan metrik 'Points' utama
+        points = social_data.get('Points', 0)
         print(f"DEBUG: Poin terdeteksi dari API: {points}")
 
         sentiment_score = 0
         sentiment_text = f"⚪ Netral (Poin: {points:,})"
         
-        # Logika skor sentimen yang disesuaikan dengan metrik 'Points'
-        if points > 30000: # Angka ini bisa disesuaikan
+        if points > 30000:
             sentiment_score = 1
             sentiment_text = f"🟢 Positif (Poin: {points:,})"
-        elif points > 0 and points < 5000: # Angka ini bisa disesuaikan
+        elif points > 0 and points < 5000:
             sentiment_score = -1
             sentiment_text = f"🔴 Negatif (Poin: {points:,})"
         
@@ -123,7 +140,7 @@ def determine_final_signal(analysis: dict, sentiment: dict):
     else:
         return "⚠️ SINYAL AKSI: TAHAN (HOLD) ⚠️"
 
-# --- FUNGSI GENERATE & KIRIM (DIPERBARUI) ---
+# --- FUNGSI GENERATE & KIRIM ---
 def generate_analysis_and_send(chat_id: int, pair: str, timeframe: str, context: CallbackContext):
     bot = context.bot
     try:
@@ -149,9 +166,7 @@ def generate_analysis_and_send(chat_id: int, pair: str, timeframe: str, context:
         sentiment_analysis = get_market_sentiment(symbol)
         final_signal = determine_final_signal(indicator_analysis, sentiment_analysis)
         
-        # --- PERUBAHAN DI SINI UNTUK ZOOM LEBIH JAUH ---
-        df_for_plot = df.tail(30) # Diubah dari 40 menjadi 30 untuk zoom maksimal
-        
+        df_for_plot = df.tail(30)
         mc = mpf.make_marketcolors(up='#41a35a', down='#d74a43', wick={'up':'#41a35a','down':'#d74a43'}, volume={'up':'#41a35a','down':'#d74a43'})
         s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', gridstyle='-')
         addplots = [
