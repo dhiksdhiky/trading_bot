@@ -1,5 +1,5 @@
 # main.py
-# VERSI POWER-USER DENGAN SEMUA FITUR BARU (PERBAIKAN ERROR)
+# VERSI POWER-USER DENGAN SEMUA FITUR BARU (PERBAIKAN FINAL)
 import os
 import requests
 import ccxt
@@ -31,11 +31,16 @@ def get_watchlist_api():
     if provided_key != API_SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 401
     
-    # Konversi database ke dictionary biasa agar bisa di-JSON-kan
     watchlist_data = {}
-    for key in db.keys():
-        watchlist_data[key] = db[key]
-    return jsonify(watchlist_data)
+    try:
+        for key in db.keys():
+            # PERBAIKAN: Konversi ObservedList dari Replit DB ke list biasa
+            watchlist_data[key] = list(db[key])
+        return jsonify(watchlist_data)
+    except Exception as e:
+        print(f"Error saat memproses database untuk API: {e}")
+        return jsonify({"error": "Internal server error while processing database"}), 500
+
 
 def run():
   app.run(host='0.0.0.0',port=8080)
@@ -111,7 +116,6 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     df['macd_hist'] = macd.macd_diff()
     df.dropna(inplace=True)
     
-    # PERBAIKAN: Cek panjang DataFrame sebelum analisis
     if len(df) < 2:
         return None, "Gagal menganalisis, data tidak cukup setelah diproses.", None
 
@@ -219,7 +223,6 @@ def analyze_command(update: Update, context: CallbackContext):
     has_buy = False
     has_sell = False
 
-    # Panggil sentiment sekali saja untuk efisiensi
     sentiment = get_market_sentiment(symbol) 
 
     for tf in timeframes:
@@ -236,7 +239,6 @@ def analyze_command(update: Update, context: CallbackContext):
             df['macd_signal'] = macd.macd_signal()
             df.dropna(inplace=True)
             
-            # PERBAIKAN: Cek panjang DataFrame sebelum analisis
             if len(df) < 2:
                 summary_text += f"`{tf}`: ⏳ Data tidak cukup.\n"
                 continue
@@ -276,7 +278,7 @@ def news_command(update: Update, context: CallbackContext):
         url = f"https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories={symbol.upper()}&api_key={CRYPTOCOMPARE_API_KEY}"
         response = requests.get(url)
         response.raise_for_status()
-        news_data = response.json()['Data'][:3] # Ambil 3 berita teratas
+        news_data = response.json()['Data'][:3] 
         
         if not news_data:
             update.message.reply_text(f"Tidak ada berita yang ditemukan untuk `{symbol}`.", parse_mode=ParseMode.MARKDOWN)
@@ -300,7 +302,7 @@ def add_command(update: Update, context: CallbackContext):
     if user_id not in db:
         db[user_id] = []
     
-    user_watchlist = db[user_id]
+    user_watchlist = list(db[user_id])
     if symbol not in user_watchlist:
         user_watchlist.append(symbol)
         db[user_id] = user_watchlist
@@ -316,7 +318,7 @@ def remove_command(update: Update, context: CallbackContext):
     symbol = context.args[0].upper()
     
     if user_id in db:
-        user_watchlist = db[user_id]
+        user_watchlist = list(db[user_id])
         if symbol in user_watchlist:
             user_watchlist.remove(symbol)
             db[user_id] = user_watchlist
@@ -373,7 +375,7 @@ def button_handler(update: Update, context: CallbackContext):
         user_id = str(query.from_user.id)
         if user_id not in db:
             db[user_id] = []
-        user_watchlist = db[user_id]
+        user_watchlist = list(db[user_id])
         if symbol not in user_watchlist:
             user_watchlist.append(symbol)
             db[user_id] = user_watchlist
