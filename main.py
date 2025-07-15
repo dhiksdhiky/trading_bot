@@ -34,54 +34,40 @@ def keep_alive():
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
-# --- FUNGSI ANALISIS SENTIMEN (PERBAIKAN FINAL) ---
+# --- FUNGSI ANALISIS SENTIMEN (PERBAIKAN FINAL - MENGGUNAKAN VOLUME) ---
 def get_market_sentiment(symbol: str):
-    print(f"--- Memulai Analisis Sentimen untuk: {symbol} ---")
+    print(f"--- Memulai Analisis Sentimen untuk: {symbol} (Metode Volume) ---")
     if not CRYPTOCOMPARE_API_KEY:
-        print("DEBUG: CryptoCompare API Key tidak ditemukan di secrets.")
+        print("DEBUG: CryptoCompare API Key tidak ditemukan.")
         return {"status": "error", "message": "CryptoCompare API Key tidak dikonfigurasi."}
     
     try:
-        # Langkah 1: Dapatkan ID internal koin dari simbolnya
-        print(f"DEBUG: Mencari ID untuk simbol {symbol}...")
-        all_coins_url = 'https://min-api.cryptocompare.com/data/all/coinlist'
-        all_coins_response = requests.get(all_coins_url)
-        all_coins_response.raise_for_status()
-        all_coins_data = all_coins_response.json()['Data']
+        # Menggunakan endpoint yang lebih andal: data volume 24 jam
+        url = f'https://min-api.cryptocompare.com/data/pricemultifull?fsyms={symbol.upper()}&tsyms=USDT&api_key={CRYPTOCOMPARE_API_KEY}'
+        print(f"DEBUG: Menghubungi URL: {url}")
         
-        coin_id = None
-        for coin_name, coin_data in all_coins_data.items():
-            if coin_data['Symbol'].upper() == symbol.upper():
-                coin_id = coin_data['Id']
-                print(f"DEBUG: ID untuk {symbol} ditemukan: {coin_id}")
-                break
+        response = requests.get(url)
+        response.raise_for_status()
         
-        if not coin_id:
-            print(f"DEBUG: Tidak dapat menemukan ID untuk {symbol}.")
+        data = response.json()
+        print(f"DEBUG: Respon mentah dari API: {data}")
+
+        raw_data = data.get('RAW', {}).get(symbol.upper(), {}).get('USDT', {})
+        
+        if not raw_data:
+            print(f"DEBUG: Tidak ada data volume untuk {symbol}.")
             return {"status": "neutral", "message": f"Sentimen untuk {symbol} tidak ditemukan."}
 
-        # Langkah 2: Gunakan ID untuk mendapatkan data sosial
-        url_social = f'https://min-api.cryptocompare.com/data/social/latest?coinId={coin_id}&api_key={CRYPTOCOMPARE_API_KEY}'
-        print(f"DEBUG: Menghubungi URL data sosial: {url_social}")
-        social_response = requests.get(url_social)
-        social_response.raise_for_status()
-        
-        response_json = social_response.json()
-        print(f"DEBUG: Respon mentah dari API sosial: {response_json}")
-
-        social_data = response_json.get('Data', {})
-        points = social_data.get('Points', 0)
-        print(f"DEBUG: Poin terdeteksi dari API: {points}")
+        volume_24h = raw_data.get('VOLUME24HOURTO', 0)
+        print(f"DEBUG: Volume 24 Jam (USDT) terdeteksi: {volume_24h}")
 
         sentiment_score = 0
-        sentiment_text = f"⚪ Netral (Poin: {points:,})"
+        sentiment_text = f"⚪ Netral (Volume: ${volume_24h:,.0f})"
         
-        if points > 30000:
+        # Logika skor sentimen berdasarkan volume (angka ini bisa disesuaikan)
+        if volume_24h > 500_000_000: # Di atas 500 juta USDT
             sentiment_score = 1
-            sentiment_text = f"🟢 Positif (Poin: {points:,})"
-        elif points > 0 and points < 5000:
-            sentiment_score = -1
-            sentiment_text = f"🔴 Negatif (Poin: {points:,})"
+            sentiment_text = f"🟢 Tinggi (Volume: ${volume_24h:,.0f})"
         
         print("--- Analisis Sentimen Selesai ---")
         return {"status": "ok", "score": sentiment_score, "text": sentiment_text}
@@ -194,7 +180,7 @@ def generate_analysis_and_send(chat_id: int, pair: str, timeframe: str, context:
             f"1. **Moving Average**: {indicator_analysis['ma']}\n"
             f"2. **RSI**: {indicator_analysis['rsi']}\n"
             f"3. **MACD**: {indicator_analysis['macd']}\n\n"
-            f"**Sentimen Pasar**: {sentiment_text}\n"
+            f"**Minat Pasar (Vol. 24 Jam)**: {sentiment_text}\n"
             f"------------------------------------\n"
             f"**{final_signal}**\n"
             f"------------------------------------\n\n"
