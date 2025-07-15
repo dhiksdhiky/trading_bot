@@ -5,7 +5,7 @@ on:
   schedule:
     # Menjalankan pada jam 7 pagi, 1 siang, dan 8 malam WIB
     # Dikonversi ke UTC: 00:00, 06:00, 13:00
-    - cron: '0 0,6,13 * * *'
+    - cron: '0 0,3,6,10,13,15 * * *'
   workflow_dispatch:
     # Menambahkan tombol "Run workflow" di tab Actions untuk tes manual
 
