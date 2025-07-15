@@ -26,7 +26,8 @@ def get_watchlist_from_repl():
 def get_price_change(symbol):
     """Mendapatkan perubahan harga dalam 1 jam terakhir."""
     try:
-        exchange = ccxt.binance() # Menggunakan Binance untuk data harga yang andal
+        # PERBAIKAN: Mengganti exchange ke KuCoin agar tidak diblokir
+        exchange = ccxt.kucoin() 
         pair = f"{symbol}/USDT"
         
         # Ambil data 1 jam terakhir dengan interval 5 menit
