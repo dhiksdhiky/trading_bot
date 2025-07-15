@@ -1,5 +1,5 @@
 # main.py
-# KODE UNTUK BOT INTERAKTIF (HOSTING 24/7 DI REPLIT)
+# KODE UNTUK BOT INTERAKTIF (HOSTING 24/7 DI REPLIT) - VERSI DIPERBARUI
 import os
 import requests
 import ccxt
@@ -34,42 +34,58 @@ def keep_alive():
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
-# --- FUNGSI ANALISIS SENTIMEN ---
+# --- FUNGSI ANALISIS SENTIMEN (DIPERBARUI) ---
 def get_market_sentiment(symbol: str):
+    """
+    Mengambil data sentimen dari CryptoCompare API dengan cara yang lebih efisien.
+    """
+    print(f"Memulai analisis sentimen untuk: {symbol}")
     if not CRYPTOCOMPARE_API_KEY:
+        print("Error: CryptoCompare API Key tidak ditemukan di secrets.")
         return {"status": "error", "message": "CryptoCompare API Key tidak dikonfigurasi."}
+    
     try:
-        url_coin_list = f'https://min-api.cryptocompare.com/data/all/coinlist?fsym={symbol.upper()}'
-        response = requests.get(url_coin_list)
-        response.raise_for_status()
-        coin_data = response.json().get('Data', {})
+        # 1. Dapatkan ID Koin secara langsung
+        url_coin_id = f'https://min-api.cryptocompare.com/data/pricemultifull?fsyms={symbol.upper()}&tsyms=USD'
+        id_response = requests.get(url_coin_id, headers={'authorization': f'Apikey {CRYPTOCOMPARE_API_KEY}'})
+        id_response.raise_for_status()
         
-        if not coin_data:
-             return {"status": "neutral", "message": f"Sentimen untuk {symbol} tidak ditemukan."}
-        
-        coin_id = list(coin_data.values())[0]['Id']
+        raw_data = id_response.json().get('RAW', {})
+        if not raw_data or symbol.upper() not in raw_data:
+            print(f"Simbol {symbol} tidak ditemukan di CryptoCompare.")
+            return {"status": "neutral", "message": f"Sentimen untuk {symbol} tidak ditemukan."}
 
-        url_social = f'https://min-api.cryptocompare.com/data/social/latest?coinId={coin_id}&api_key={CRYPTOCOMPARE_API_KEY}'
+        # 2. Ambil data sosial menggunakan ID yang sama (meskipun API tidak memerlukannya, ini untuk konfirmasi)
+        # Endpoint utama tetap menggunakan simbol
+        url_social = f'https://min-api.cryptocompare.com/data/v4/social/latest?fsym={symbol.upper()}&api_key={CRYPTOCOMPARE_API_KEY}'
         social_response = requests.get(url_social)
         social_response.raise_for_status()
-        social_data = social_response.json()['Data']
-        points = social_data.get('CryptoCompare', {}).get('Points', 0)
         
+        social_data = social_response.json().get('Data', {})
+        points = social_data.get('twitter', {}).get('followers', 0) + social_data.get('reddit', {}).get('subscribers', 0)
+        print(f"Poin sentimen dari {symbol}: {points}")
+
         sentiment_score = 0
         sentiment_text = f"⚪ Netral (Poin: {points:,})"
-        if points > 50000:
+        
+        # Logika skor sentimen yang disesuaikan
+        if points > 100000: # Angka ini bisa disesuaikan
             sentiment_score = 1
             sentiment_text = f"🟢 Positif (Poin: {points:,})"
-        elif points < 20000 and points > 0:
+        elif points > 0 and points < 10000: # Angka ini bisa disesuaikan
             sentiment_score = -1
             sentiment_text = f"🔴 Negatif (Poin: {points:,})"
         
         return {"status": "ok", "score": sentiment_score, "text": sentiment_text}
+
+    except requests.exceptions.HTTPError as http_err:
+        print(f"HTTP error saat mengambil data sentimen: {http_err} - Response: {http_err.response.text}")
+        return {"status": "error", "message": "Gagal terhubung ke API sentimen (HTTP Error)."}
     except Exception as e:
-        print(f"Error saat mengambil data sentimen: {e}")
+        print(f"Error tak terduga di get_market_sentiment: {e}")
         return {"status": "neutral", "message": f"Sentimen untuk {symbol} tidak dapat diproses."}
 
-# --- FUNGSI ANALISIS TEKNIKAL ---
+# --- FUNGSI ANALISIS TEKNIKAL (Tidak ada perubahan) ---
 def analyze_indicators(df: pd.DataFrame):
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -116,7 +132,7 @@ def determine_final_signal(analysis: dict, sentiment: dict):
     else:
         return "⚠️ SINYAL AKSI: TAHAN (HOLD) ⚠️"
 
-# --- FUNGSI GENERATE & KIRIM ---
+# --- FUNGSI GENERATE & KIRIM (DIPERBARUI) ---
 def generate_analysis_and_send(chat_id: int, pair: str, timeframe: str, context: CallbackContext):
     bot = context.bot
     try:
@@ -142,7 +158,9 @@ def generate_analysis_and_send(chat_id: int, pair: str, timeframe: str, context:
         sentiment_analysis = get_market_sentiment(symbol)
         final_signal = determine_final_signal(indicator_analysis, sentiment_analysis)
         
-        df_for_plot = df.tail(60)
+        # --- PERUBAHAN DI SINI UNTUK ZOOM ---
+        df_for_plot = df.tail(40) # Diubah dari 60 menjadi 40 untuk zoom
+        
         mc = mpf.make_marketcolors(up='#41a35a', down='#d74a43', wick={'up':'#41a35a','down':'#d74a43'}, volume={'up':'#41a35a','down':'#d74a43'})
         s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', gridstyle='-')
         addplots = [
@@ -185,7 +203,7 @@ def generate_analysis_and_send(chat_id: int, pair: str, timeframe: str, context:
         print(f"Error di generate_analysis_and_send: {e}")
         bot.send_message(chat_id, text=f"Terjadi kesalahan internal saat memproses `{pair}`.", parse_mode=ParseMode.MARKDOWN)
 
-# --- HANDLER PERINTAH TELEGRAM ---
+# --- HANDLER PERINTAH TELEGRAM (Tidak ada perubahan) ---
 def start_command(update: Update, context: CallbackContext):
     user = update.effective_user
     update.message.reply_text(
@@ -207,15 +225,13 @@ def chart_command(update: Update, context: CallbackContext):
     finally:
         context.bot.delete_message(chat_id=update.message.chat_id, message_id=wait_message.message_id)
 
-# --- FUNGSI UTAMA BOT ---
+# --- FUNGSI UTAMA BOT (Tidak ada perubahan) ---
 def main():
     if not TELEGRAM_TOKEN:
         print("Error: TELEGRAM_TOKEN tidak diset.")
         return
     
-    # Menjalankan web server di thread terpisah
     keep_alive()
-
     updater = Updater(TELEGRAM_TOKEN)
     dispatcher = updater.dispatcher
     dispatcher.add_handler(CommandHandler("start", start_command))
