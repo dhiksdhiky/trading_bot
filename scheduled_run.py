@@ -5,7 +5,6 @@ import telegram
 from telegram import ParseMode, Bot
 
 # Impor fungsi inti dari main.py agar tidak duplikasi kode
-# Catatan: GitHub Actions tidak akan menjalankan bagian web server dari main.py
 from main import generate_analysis_and_send
 
 # --- KONFIGURASI ---
