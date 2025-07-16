@@ -8,5 +8,4 @@ numpy
 requests
 pytz
 Flask
-replit
 gunicorn
