@@ -1,5 +1,5 @@
 # scheduled_run.py
-# VERSI MANDIRI DENGAN INDIKATOR BARU
+# VERSI MANDIRI DENGAN SEMUA INDIKATOR TERBARU
 import os
 import requests
 import ccxt
@@ -64,6 +64,11 @@ def analyze_indicators(df: pd.DataFrame):
         analysis['bb_score'] = -1
     else:
         analysis['bb'] = "⚪ Harga di dalam Bands"
+    avg_volume = df['volume'].rolling(window=20).mean().iloc[-1]
+    if last['volume'] > avg_volume * 1.75:
+        analysis['volume'] = "🔥 Tinggi (Konfirmasi Tren)"
+    else:
+        analysis['volume'] = "⚪ Normal"
     return analysis
 
 def determine_final_signal(analysis: dict, sentiment: dict):
@@ -138,7 +143,8 @@ def generate_chart_and_caption(pair: str, timeframe: str):
         f"1. **Moving Average**: {indicator_analysis['ma']}\n"
         f"2. **RSI**: {indicator_analysis['rsi']}\n"
         f"3. **MACD**: {indicator_analysis['macd']}\n"
-        f"4. **Bollinger Bands**: {indicator_analysis['bb']}\n\n"
+        f"4. **Bollinger Bands**: {indicator_analysis['bb']}\n"
+        f"5. **Volume**: {indicator_analysis['volume']}\n\n"
         f"**Sentimen Pasar**: {sentiment_analysis['text']}\n"
         f"------------------------------------\n"
         f"**{final_signal}**"
