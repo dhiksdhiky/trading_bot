@@ -1,5 +1,5 @@
 # main.py
-# VERSI DENGAN INDIKATOR BARU: BOLLINGER BANDS & FEAR/GREED INDEX
+# VERSI DENGAN INDIKATOR VOLUME DIKEMBALIKAN
 import os
 import requests
 import ccxt
@@ -59,7 +59,6 @@ CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY')
 
 # --- FUNGSI HELPER BARU & DIPERBARUI ---
 def get_fear_and_greed_index():
-    """Mengambil data Fear & Greed Index dari API alternative.me."""
     try:
         url = "https://api.alternative.me/fng/?limit=1"
         response = requests.get(url)
@@ -71,10 +70,10 @@ def get_fear_and_greed_index():
         sentiment_score = 0
         emoji = "😐"
         if "Extreme Fear" in classification or "Fear" in classification:
-            sentiment_score = 1 # Contrarian buy signal
+            sentiment_score = 1
             emoji = "😨"
         elif "Extreme Greed" in classification or "Greed" in classification:
-            sentiment_score = -1 # Contrarian sell signal
+            sentiment_score = -1
             emoji = "🤑"
             
         sentiment_text = f"{emoji} {classification} ({value})"
@@ -103,12 +102,18 @@ def analyze_indicators(df: pd.DataFrame):
     analysis['bb_score'] = 0
     if last['close'] < last['bb_low']:
         analysis['bb'] = "🟢 Harga di bawah Lower Band"
-        analysis['bb_score'] = 1 # Buy signal
+        analysis['bb_score'] = 1
     elif last['close'] > last['bb_high']:
         analysis['bb'] = "🔴 Harga di atas Upper Band"
-        analysis['bb_score'] = -1 # Sell signal
+        analysis['bb_score'] = -1
     else:
         analysis['bb'] = "⚪ Harga di dalam Bands"
+    # PEMBARUAN: Tambahkan kembali analisis Volume
+    avg_volume = df['volume'].rolling(window=20).mean().iloc[-1]
+    if last['volume'] > avg_volume * 1.75:
+        analysis['volume'] = "🔥 Tinggi (Konfirmasi Tren)"
+    else:
+        analysis['volume'] = "⚪ Normal"
     return analysis
 
 def determine_final_signal(analysis: dict, sentiment: dict):
@@ -119,7 +124,6 @@ def determine_final_signal(analysis: dict, sentiment: dict):
     if "Death Cross" in analysis['macd']: score -= 2
     if "Oversold" in analysis['rsi']: score += 1
     if "Overbought" in analysis['rsi']: score -= 1
-    # Penambahan skor dari indikator baru
     score += analysis.get('bb_score', 0)
     if sentiment.get('status') == 'ok':
         score += sentiment.get('score', 0)
@@ -135,7 +139,6 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('timestamp', inplace=True)
-    # Hitung semua indikator termasuk Bollinger Bands
     df['ma9'] = ta.trend.sma_indicator(df['close'], window=9)
     df['ma26'] = ta.trend.sma_indicator(df['close'], window=26)
     df['rsi'] = ta.momentum.rsi(df['close'], window=14)
@@ -153,7 +156,7 @@ def generate_chart_and_caption(pair: str, timeframe: str):
 
     indicator_analysis = analyze_indicators(df)
     symbol = pair.split('/')[0]
-    sentiment_analysis = get_fear_and_greed_index() # Menggunakan F&G Index
+    sentiment_analysis = get_fear_and_greed_index()
     final_signal = determine_final_signal(indicator_analysis, sentiment_analysis)
     
     df_for_plot = df.tail(30)
@@ -167,7 +170,6 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     mc = mpf.make_marketcolors(up='#41a35a', down='#d74a43', wick={'up':'#41a35a','down':'#d74a43'}, volume={'up':'#41a35a','down':'#d74a43'})
     s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', gridstyle='-')
     
-    # Tambahkan Bollinger Bands ke plot
     addplots = [
         mpf.make_addplot(df_for_plot[['bb_high', 'bb_low']], color='gray', alpha=0.3),
         mpf.make_addplot(df_for_plot['rsi'], panel=1, color='purple', ylabel='RSI'),
@@ -182,7 +184,7 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     filename = f'analysis_{pair.replace("/", "")}_{timeframe}.png'
     mpf.plot(df_for_plot, type='candle', style=s, title=f'Analisis {pair} - Timeframe {timeframe}', ylabel='Harga (USDT)', volume=True, mav=(9, 26), addplot=addplots, panel_ratios=(8, 3, 3), figscale=1.5, savefig=filename)
     
-    # Perbarui caption dengan indikator baru
+    # PEMBARUAN: Tambahkan kembali Volume ke caption
     caption = (
         f"📊 **Analisis: {pair} | {timeframe} ({change_str})**\n"
         f"*(Harga: `${harga_terkini:,.2f}` pada {waktu_sekarang})*\n\n"
@@ -190,14 +192,15 @@ def generate_chart_and_caption(pair: str, timeframe: str):
         f"1. **Moving Average**: {indicator_analysis['ma']}\n"
         f"2. **RSI**: {indicator_analysis['rsi']}\n"
         f"3. **MACD**: {indicator_analysis['macd']}\n"
-        f"4. **Bollinger Bands**: {indicator_analysis['bb']}\n\n"
+        f"4. **Bollinger Bands**: {indicator_analysis['bb']}\n"
+        f"5. **Volume**: {indicator_analysis['volume']}\n\n"
         f"**Sentimen Pasar**: {sentiment_analysis['text']}\n"
         f"------------------------------------\n"
         f"**{final_signal}**"
     )
     return filename, caption, symbol
 
-# --- HANDLER PERINTAH (Hanya /analyze yang diubah) ---
+# --- HANDLER PERINTAH ---
 def start_command(update: Update, context: CallbackContext):
     text = (
         "👋 **Selamat Datang di Bot Analisis Kripto v4!**\n\n"
@@ -329,7 +332,7 @@ def analyze_command(update: Update, context: CallbackContext):
     summary_text += f"\n{final_verdict}\n\n*Sentimen Pasar Global: {sentiment['text']}*"
     context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=summary_text, parse_mode=ParseMode.MARKDOWN)
 
-# --- HANDLER WATCHLIST & TOMBOL (Tidak ada perubahan) ---
+# --- HANDLER WATCHLIST & TOMBOL ---
 def news_command(update: Update, context: CallbackContext):
     if not context.args:
         update.message.reply_text("Format salah. Gunakan: `/news <simbol>`")
