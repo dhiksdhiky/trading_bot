@@ -1,5 +1,5 @@
 # scheduled_run.py
-# VERSI FINAL MANDIRI - TIDAK LAGI MENGIMPOR DARI MAIN.PY
+# VERSI FINAL MANDIRI DENGAN TAMBAHAN PERSENTASE HARGA
 import os
 import requests
 import ccxt
@@ -46,8 +46,8 @@ def analyze_indicators(df: pd.DataFrame):
     if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought ({last['rsi']:.2f})"
     elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold ({last['rsi']:.2f})"
     else: analysis['rsi'] = f"⚪ Netral ({last['rsi']:.2f})"
-    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']: analysis['macd'] = "🟢 Golden Cross"
-    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']: analysis['macd'] = "🔴 Death Cross"
+    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']: analysis['ma'] = "🟢 Golden Cross"
+    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']: analysis['ma'] = "🔴 Death Cross"
     else: analysis['macd'] = "⚪ Netral"
     return analysis
 
@@ -88,6 +88,14 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     final_signal = determine_final_signal(indicator_analysis, sentiment_analysis)
     
     df_for_plot = df.tail(30)
+    
+    # PEMBARUAN: Hitung persentase perubahan harga untuk chart
+    first_price = df_for_plot['close'].iloc[0]
+    last_price = df_for_plot['close'].iloc[-1]
+    change_pct = ((last_price - first_price) / first_price) * 100
+    change_emoji = "📈" if change_pct >= 0 else "📉"
+    change_str = f"{change_emoji} {change_pct:+.2f}%"
+    
     mc = mpf.make_marketcolors(up='#41a35a', down='#d74a43', wick={'up':'#41a35a','down':'#d74a43'}, volume={'up':'#41a35a','down':'#d74a43'})
     s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', gridstyle='-')
     addplots = [
@@ -103,8 +111,9 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     filename = f'analysis_{pair.replace("/", "")}_{timeframe}.png'
     mpf.plot(df_for_plot, type='candle', style=s, title=f'Analisis {pair} - Timeframe {timeframe}', ylabel='Harga (USDT)', volume=True, mav=(9, 26), addplot=addplots, panel_ratios=(8, 3, 3), figscale=1.5, savefig=filename)
     
+    # PEMBARUAN: Tambahkan persentase perubahan ke caption
     caption = (
-        f"📊 **Analisis Terjadwal: {pair} | {timeframe}**\n"
+        f"📊 **Analisis Terjadwal: {pair} | {timeframe} ({change_str})**\n"
         f"*(Harga: `${harga_terkini:,.2f}` pada {waktu_sekarang})*\n\n"
         f"**Indikator Teknikal:**\n"
         f"1. **Moving Average**: {indicator_analysis['ma']}\n"
