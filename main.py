@@ -1,5 +1,5 @@
 # main.py
-# VERSI POWER-USER DENGAN SEMUA FITUR BARU (PERBAIKAN FINAL)
+# VERSI UNTUK DEPLOYMENT DI RAILWAY
 import os
 import requests
 import ccxt
@@ -11,7 +11,7 @@ import json
 from datetime import datetime
 from telegram import Update, ParseMode, Bot, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
-from replit import db # Menggunakan database bawaan Replit
+from replit import db # Library ini tetap berfungsi karena kita menggunakan file .db dari Replit
 
 # --- Bagian untuk Web Server & API Watchlist ---
 from flask import Flask, request, jsonify
@@ -22,7 +22,7 @@ API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
 
 @app.route('/')
 def home():
-    return "Bot sedang aktif."
+    return "Bot sedang aktif dan berjalan di Railway."
 
 # Endpoint API untuk diakses oleh GitHub Actions
 @app.route('/api/watchlist')
@@ -34,27 +34,18 @@ def get_watchlist_api():
     watchlist_data = {}
     try:
         for key in db.keys():
-            # PERBAIKAN: Konversi ObservedList dari Replit DB ke list biasa
             watchlist_data[key] = list(db[key])
         return jsonify(watchlist_data)
     except Exception as e:
         print(f"Error saat memproses database untuk API: {e}")
         return jsonify({"error": "Internal server error while processing database"}), 500
 
+def run_web_server():
+  # Railway menyediakan port melalui environment variable
+  port = int(os.environ.get("PORT", 8080))
+  app.run(host='0.0.0.0', port=port)
 
-def run():
-  app.run(host='0.0.0.0',port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-# ---------------------------------------------------------
-
-# --- KONFIGURASI ---
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
-
-# --- FUNGSI HELPER (Analisis, Sinyal, dll) ---
+# --- FUNGSI HELPER (Tidak ada perubahan) ---
 def get_market_sentiment(symbol: str):
     try:
         url = f'https://min-api.cryptocompare.com/data/pricemultifull?fsyms={symbol.upper()}&tsyms=USDT&api_key={CRYPTOCOMPARE_API_KEY}'
@@ -72,7 +63,6 @@ def get_market_sentiment(symbol: str):
         return {"status": "error", "message": "Gagal memuat sentimen."}
 
 def analyze_indicators(df: pd.DataFrame):
-    # Fungsi ini sekarang aman karena kita sudah memastikan df memiliki >= 2 baris
     last = df.iloc[-1]
     prev = df.iloc[-2]
     analysis = {}
@@ -100,7 +90,7 @@ def determine_final_signal(analysis: dict, sentiment: dict):
     elif score <= -2: return "🚨 SINYAL AKSI: JUAL (SELL) 🚨"
     else: return "⚠️ SINYAL AKSI: TAHAN (HOLD) ⚠️"
 
-# --- FUNGSI INTI (Chart, Analisis, Berita) ---
+# --- FUNGSI INTI (Tidak ada perubahan) ---
 def generate_chart_and_caption(pair: str, timeframe: str):
     exchange = ccxt.kucoin()
     ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, limit=200)
@@ -153,7 +143,7 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     )
     return filename, caption, symbol
 
-# --- HANDLER PERINTAH ---
+# --- HANDLER PERINTAH (Tidak ada perubahan) ---
 def start_command(update: Update, context: CallbackContext):
     text = (
         "👋 **Selamat Datang di Bot Analisis Kripto v3!**\n\n"
@@ -389,7 +379,10 @@ def main():
         print("Error: TELEGRAM_TOKEN tidak diset.")
         return
     
-    keep_alive()
+    # Jalankan web server di thread terpisah agar bot tidak diblokir
+    web_thread = Thread(target=run_web_server)
+    web_thread.start()
+    
     updater = Updater(TELEGRAM_TOKEN)
     dispatcher = updater.dispatcher
     
