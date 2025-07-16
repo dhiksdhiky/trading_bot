@@ -1,5 +1,5 @@
 # main.py
-# VERSI FINAL DENGAN PEMISAHAN PROSES UNTUK RAILWAY
+# VERSI DENGAN TAMBAHAN PERSENTASE PERUBAHAN HARGA
 import os
 import requests
 import ccxt
@@ -8,13 +8,13 @@ import mplfinance as mpf
 import ta
 import pytz
 import json
-import sys
 from datetime import datetime
 from telegram import Update, ParseMode, Bot, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
 
 # --- Bagian untuk Web Server & API Watchlist ---
 from flask import Flask, request, jsonify
+from threading import Thread
 
 app = Flask('')
 API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
@@ -23,11 +23,9 @@ API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
 DATA_DIR = "/app/data"
 WATCHLIST_FILE = os.path.join(DATA_DIR, "watchlist.json")
 
-# Pastikan direktori data ada
 os.makedirs(DATA_DIR, exist_ok=True)
 
 def load_watchlist_db():
-    """Membaca data watchlist dari file JSON."""
     try:
         with open(WATCHLIST_FILE, 'r') as f:
             return json.load(f)
@@ -35,13 +33,12 @@ def load_watchlist_db():
         return {}
 
 def save_watchlist_db(data):
-    """Menyimpan data watchlist ke file JSON."""
     with open(WATCHLIST_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
 @app.route('/')
 def home():
-    return "Web server untuk bot aktif."
+    return "Bot sedang aktif dan berjalan di Railway."
 
 @app.route('/api/watchlist')
 def get_watchlist_api():
@@ -52,7 +49,9 @@ def get_watchlist_api():
     watchlist_data = load_watchlist_db()
     return jsonify(watchlist_data)
 
-# ---------------------------------------------------------
+def run_web_server():
+  port = int(os.environ.get("PORT", 8080))
+  app.run(host='0.0.0.0', port=port)
 
 # --- KONFIGURASI ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -128,6 +127,14 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     final_signal = determine_final_signal(indicator_analysis, sentiment_analysis)
     
     df_for_plot = df.tail(30)
+    
+    # PEMBARUAN: Hitung persentase perubahan harga untuk chart
+    first_price = df_for_plot['close'].iloc[0]
+    last_price = df_for_plot['close'].iloc[-1]
+    change_pct = ((last_price - first_price) / first_price) * 100
+    change_emoji = "📈" if change_pct >= 0 else "📉"
+    change_str = f"{change_emoji} {change_pct:+.2f}%"
+
     mc = mpf.make_marketcolors(up='#41a35a', down='#d74a43', wick={'up':'#41a35a','down':'#d74a43'}, volume={'up':'#41a35a','down':'#d74a43'})
     s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', gridstyle='-')
     addplots = [
@@ -143,8 +150,9 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     filename = f'analysis_{pair.replace("/", "")}_{timeframe}.png'
     mpf.plot(df_for_plot, type='candle', style=s, title=f'Analisis {pair} - Timeframe {timeframe}', ylabel='Harga (USDT)', volume=True, mav=(9, 26), addplot=addplots, panel_ratios=(8, 3, 3), figscale=1.5, savefig=filename)
     
+    # PEMBARUAN: Tambahkan persentase perubahan ke caption
     caption = (
-        f"📊 **Analisis: {pair} | {timeframe}**\n"
+        f"📊 **Analisis: {pair} | {timeframe} ({change_str})**\n"
         f"*(Harga: `${harga_terkini:,.2f}` pada {waktu_sekarang})*\n\n"
         f"**Indikator Teknikal:**\n"
         f"1. **Moving Average**: {indicator_analysis['ma']}\n"
@@ -249,6 +257,15 @@ def analyze_command(update: Update, context: CallbackContext):
             analysis = analyze_indicators(df)
             signal = determine_final_signal(analysis, sentiment)
             
+            # PEMBARUAN: Hitung persentase perubahan harga untuk setiap timeframe
+            df_period = df.tail(24) # Analisis perubahan dalam 24 candle terakhir
+            change_str = ""
+            if len(df_period) >= 2:
+                first_price = df_period['close'].iloc[0]
+                last_price = df_period['close'].iloc[-1]
+                change_pct = ((last_price - first_price) / first_price) * 100
+                change_str = f"({change_pct:+.2f}%)"
+
             signal_emoji = "➡️"
             if "BELI" in signal: 
                 signal_emoji = "🟢"
@@ -257,7 +274,7 @@ def analyze_command(update: Update, context: CallbackContext):
                 signal_emoji = "🔴"
                 has_sell = True
 
-            summary_text += f"`{tf}`: {signal_emoji} {analysis['ma']}, RSI {analysis['rsi'].split(' ')[1]}, MACD {analysis['macd'].split(' ')[1]}\n"
+            summary_text += f"`{tf}`: {signal_emoji} {analysis['ma']} {change_str}\n"
         except Exception:
             summary_text += f"`{tf}`: ❌ Gagal dimuat.\n"
     
@@ -386,7 +403,6 @@ def button_handler(update: Update, context: CallbackContext):
 
 # --- FUNGSI UTAMA BOT ---
 def main_bot():
-    """Fungsi untuk menjalankan bot Telegram."""
     if not TELEGRAM_TOKEN:
         print("Error: TELEGRAM_TOKEN tidak diset. Bot tidak akan berjalan.")
         return
@@ -409,6 +425,6 @@ def main_bot():
     updater.idle()
 
 if __name__ == "__main__":
-    # Ini akan dijalankan oleh perintah `python main.py`
-    # Perintah `gunicorn main:app` akan menjalankan server web secara terpisah.
+    web_thread = Thread(target=run_web_server)
+    web_thread.start()
     main_bot()
