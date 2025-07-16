@@ -1,5 +1,5 @@
 # main.py
-# VERSI FINAL DENGAN PENYIMPANAN JSON DI RAILWAY
+# VERSI FINAL DENGAN PEMISAHAN PROSES UNTUK RAILWAY
 import os
 import requests
 import ccxt
@@ -8,13 +8,13 @@ import mplfinance as mpf
 import ta
 import pytz
 import json
+import sys
 from datetime import datetime
 from telegram import Update, ParseMode, Bot, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
 
 # --- Bagian untuk Web Server & API Watchlist ---
 from flask import Flask, request, jsonify
-from threading import Thread
 
 app = Flask('')
 API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
@@ -32,7 +32,7 @@ def load_watchlist_db():
         with open(WATCHLIST_FILE, 'r') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {} # Kembalikan dictionary kosong jika file tidak ada atau rusak
+        return {}
 
 def save_watchlist_db(data):
     """Menyimpan data watchlist ke file JSON."""
@@ -41,9 +41,8 @@ def save_watchlist_db(data):
 
 @app.route('/')
 def home():
-    return "Bot sedang aktif dan berjalan di Railway."
+    return "Web server untuk bot aktif."
 
-# Endpoint API untuk diakses oleh GitHub Actions
 @app.route('/api/watchlist')
 def get_watchlist_api():
     provided_key = request.args.get('secret')
@@ -53,17 +52,13 @@ def get_watchlist_api():
     watchlist_data = load_watchlist_db()
     return jsonify(watchlist_data)
 
-def run_web_server():
-  port = int(os.environ.get("PORT", 8080))
-  app.run(host='0.0.0.0', port=port)
-
 # ---------------------------------------------------------
 
 # --- KONFIGURASI ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
-# --- FUNGSI HELPER (Tidak ada perubahan) ---
+# --- FUNGSI HELPER ---
 def get_market_sentiment(symbol: str):
     try:
         url = f'https://min-api.cryptocompare.com/data/pricemultifull?fsyms={symbol.upper()}&tsyms=USDT&api_key={CRYPTOCOMPARE_API_KEY}'
@@ -108,7 +103,7 @@ def determine_final_signal(analysis: dict, sentiment: dict):
     elif score <= -2: return "🚨 SINYAL AKSI: JUAL (SELL) 🚨"
     else: return "⚠️ SINYAL AKSI: TAHAN (HOLD) ⚠️"
 
-# --- FUNGSI INTI (Tidak ada perubahan) ---
+# --- FUNGSI INTI ---
 def generate_chart_and_caption(pair: str, timeframe: str):
     exchange = ccxt.kucoin()
     ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, limit=200)
@@ -299,7 +294,7 @@ def news_command(update: Update, context: CallbackContext):
     except Exception as e:
         update.message.reply_text(f"Gagal mengambil berita: {e}")
 
-# --- HANDLER WATCHLIST (Database) ---
+# --- HANDLER WATCHLIST ---
 def add_command(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     if not context.args:
@@ -390,13 +385,11 @@ def button_handler(update: Update, context: CallbackContext):
             query.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
 
 # --- FUNGSI UTAMA BOT ---
-def main():
+def main_bot():
+    """Fungsi untuk menjalankan bot Telegram."""
     if not TELEGRAM_TOKEN:
-        print("Error: TELEGRAM_TOKEN tidak diset.")
+        print("Error: TELEGRAM_TOKEN tidak diset. Bot tidak akan berjalan.")
         return
-    
-    web_thread = Thread(target=run_web_server)
-    web_thread.start()
     
     updater = Updater(TELEGRAM_TOKEN)
     dispatcher = updater.dispatcher
@@ -411,9 +404,11 @@ def main():
     dispatcher.add_handler(CommandHandler("watchlist", watchlist_command))
     dispatcher.add_handler(CallbackQueryHandler(button_handler))
     
+    print("Memulai polling untuk bot Telegram...")
     updater.start_polling()
-    print("Bot Power-User berhasil dijalankan...")
     updater.idle()
 
 if __name__ == "__main__":
-    main()
+    # Ini akan dijalankan oleh perintah `python main.py`
+    # Perintah `gunicorn main:app` akan menjalankan server web secara terpisah.
+    main_bot()
