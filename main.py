@@ -1,5 +1,5 @@
 # main.py
-# VERSI DENGAN INDIKATOR VOLUME DIKEMBALIKAN
+# VERSI FINAL DENGAN DATA NUMERIK PADA INDIKATOR
 import os
 import requests
 import ccxt
@@ -86,34 +86,49 @@ def analyze_indicators(df: pd.DataFrame):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     analysis = {}
+    
     # MA
-    if last['close'] > last['ma9'] and last['ma9'] > last['ma26']: analysis['ma'] = "🟢 Bullish"
-    elif last['close'] < last['ma9'] and last['ma9'] < last['ma26']: analysis['ma'] = "🔴 Bearish"
-    else: analysis['ma'] = "⚪ Netral"
+    ma9_val = last['ma9']
+    ma26_val = last['ma26']
+    if ma9_val > ma26_val and last['close'] > ma9_val:
+        analysis['ma'] = f"🟢 Bullish (`{ma9_val:.2f}` > `{ma26_val:.2f}`)"
+    elif ma9_val < ma26_val and last['close'] < ma9_val:
+        analysis['ma'] = f"🔴 Bearish (`{ma9_val:.2f}` < `{ma26_val:.2f}`)"
+    else:
+        analysis['ma'] = "⚪ Netral"
+    
     # RSI
-    if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought ({last['rsi']:.2f})"
-    elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold ({last['rsi']:.2f})"
-    else: analysis['rsi'] = f"⚪ Netral ({last['rsi']:.2f})"
+    analysis['rsi'] = f"({last['rsi']:.2f})"
+    if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought {analysis['rsi']}"
+    elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold {analysis['rsi']}"
+    else: analysis['rsi'] = f"⚪ Netral {analysis['rsi']}"
+    
     # MACD
-    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']: analysis['macd'] = "🟢 Golden Cross"
-    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']: analysis['macd'] = "🔴 Death Cross"
-    else: analysis['macd'] = "⚪ Netral"
+    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']:
+        analysis['macd'] = "🟢 Golden Cross"
+    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']:
+        analysis['macd'] = "🔴 Death Cross"
+    else:
+        analysis['macd'] = "⚪ Netral"
+    
     # Bollinger Bands
     analysis['bb_score'] = 0
     if last['close'] < last['bb_low']:
-        analysis['bb'] = "🟢 Harga di bawah Lower Band"
+        analysis['bb'] = f"🟢 Di bawah Lower Band (`{last['bb_low']:.2f}`)"
         analysis['bb_score'] = 1
     elif last['close'] > last['bb_high']:
-        analysis['bb'] = "🔴 Harga di atas Upper Band"
+        analysis['bb'] = f"🔴 Di atas Upper Band (`{last['bb_high']:.2f}`)"
         analysis['bb_score'] = -1
     else:
-        analysis['bb'] = "⚪ Harga di dalam Bands"
-    # PEMBARUAN: Tambahkan kembali analisis Volume
+        analysis['bb'] = "⚪ Di dalam Bands"
+        
+    # Volume
     avg_volume = df['volume'].rolling(window=20).mean().iloc[-1]
-    if last['volume'] > avg_volume * 1.75:
-        analysis['volume'] = "🔥 Tinggi (Konfirmasi Tren)"
+    current_volume = last['volume']
+    if current_volume > avg_volume * 1.75:
+        analysis['volume'] = f"🔥 Tinggi (`{current_volume:,.0f}`)"
     else:
-        analysis['volume'] = "⚪ Normal"
+        analysis['volume'] = f"⚪ Normal (`{current_volume:,.0f}`)"
     return analysis
 
 def determine_final_signal(analysis: dict, sentiment: dict):
@@ -184,7 +199,6 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     filename = f'analysis_{pair.replace("/", "")}_{timeframe}.png'
     mpf.plot(df_for_plot, type='candle', style=s, title=f'Analisis {pair} - Timeframe {timeframe}', ylabel='Harga (USDT)', volume=True, mav=(9, 26), addplot=addplots, panel_ratios=(8, 3, 3), figscale=1.5, savefig=filename)
     
-    # PEMBARUAN: Tambahkan kembali Volume ke caption
     caption = (
         f"📊 **Analisis: {pair} | {timeframe} ({change_str})**\n"
         f"*(Harga: `${harga_terkini:,.2f}` pada {waktu_sekarang})*\n\n"
@@ -203,8 +217,8 @@ def generate_chart_and_caption(pair: str, timeframe: str):
 # --- HANDLER PERINTAH ---
 def start_command(update: Update, context: CallbackContext):
     text = (
-        "👋 **Selamat Datang di Bot Analisis Kripto v4!**\n\n"
-        "Fitur baru: Bollinger Bands & Fear/Greed Index untuk sinyal yang lebih akurat.\n\n"
+        "👋 **Selamat Datang di Bot Analisis Kripto v5!**\n\n"
+        "Fitur baru: Detail numerik pada setiap indikator.\n\n"
         "Gunakan `/help` untuk daftar perintah."
     )
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
@@ -319,8 +333,11 @@ def analyze_command(update: Update, context: CallbackContext):
                 signal_emoji = "🔴"
                 has_sell = True
 
-            summary_text += f"`{tf}`: {signal_emoji} {analysis['ma']} {change_str}\n"
-        except Exception:
+            # PEMBARUAN: Tampilkan RSI di ringkasan /analyze
+            rsi_val_str = analysis['rsi'].split('(')[1].split(')')[0]
+            summary_text += f"`{tf}`: {signal_emoji} {analysis['ma'].split(' ')[1]} (RSI: {rsi_val_str}) {change_str}\n"
+        except Exception as e:
+            print(f"Error in analyze loop for {tf}: {e}")
             summary_text += f"`{tf}`: ❌ Gagal dimuat.\n"
     
     final_verdict = "⚠️ **Kesimpulan: NETRAL / KONSOLIDASI**"
@@ -472,3 +489,4 @@ if __name__ == "__main__":
     web_thread = Thread(target=run_web_server)
     web_thread.start()
     main_bot()
+
