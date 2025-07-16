@@ -1,5 +1,5 @@
 # main.py
-# VERSI UNTUK DEPLOYMENT DI RAILWAY
+# VERSI FINAL DENGAN PENYIMPANAN JSON DI RAILWAY
 import os
 import requests
 import ccxt
@@ -11,7 +11,6 @@ import json
 from datetime import datetime
 from telegram import Update, ParseMode, Bot, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
-from replit import db # Library ini tetap berfungsi karena kita menggunakan file .db dari Replit
 
 # --- Bagian untuk Web Server & API Watchlist ---
 from flask import Flask, request, jsonify
@@ -19,6 +18,26 @@ from threading import Thread
 
 app = Flask('')
 API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
+
+# --- KONFIGURASI PENYIMPANAN JSON ---
+DATA_DIR = "/app/data"
+WATCHLIST_FILE = os.path.join(DATA_DIR, "watchlist.json")
+
+# Pastikan direktori data ada
+os.makedirs(DATA_DIR, exist_ok=True)
+
+def load_watchlist_db():
+    """Membaca data watchlist dari file JSON."""
+    try:
+        with open(WATCHLIST_FILE, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {} # Kembalikan dictionary kosong jika file tidak ada atau rusak
+
+def save_watchlist_db(data):
+    """Menyimpan data watchlist ke file JSON."""
+    with open(WATCHLIST_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
 
 @app.route('/')
 def home():
@@ -31,19 +50,18 @@ def get_watchlist_api():
     if provided_key != API_SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 401
     
-    watchlist_data = {}
-    try:
-        for key in db.keys():
-            watchlist_data[key] = list(db[key])
-        return jsonify(watchlist_data)
-    except Exception as e:
-        print(f"Error saat memproses database untuk API: {e}")
-        return jsonify({"error": "Internal server error while processing database"}), 500
+    watchlist_data = load_watchlist_db()
+    return jsonify(watchlist_data)
 
 def run_web_server():
-  # Railway menyediakan port melalui environment variable
   port = int(os.environ.get("PORT", 8080))
   app.run(host='0.0.0.0', port=port)
+
+# ---------------------------------------------------------
+
+# --- KONFIGURASI ---
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
 # --- FUNGSI HELPER (Tidak ada perubahan) ---
 def get_market_sentiment(symbol: str):
@@ -143,7 +161,7 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     )
     return filename, caption, symbol
 
-# --- HANDLER PERINTAH (Tidak ada perubahan) ---
+# --- HANDLER PERINTAH ---
 def start_command(update: Update, context: CallbackContext):
     text = (
         "👋 **Selamat Datang di Bot Analisis Kripto v3!**\n\n"
@@ -289,13 +307,13 @@ def add_command(update: Update, context: CallbackContext):
         return
     symbol = context.args[0].upper()
     
+    db = load_watchlist_db()
     if user_id not in db:
         db[user_id] = []
     
-    user_watchlist = list(db[user_id])
-    if symbol not in user_watchlist:
-        user_watchlist.append(symbol)
-        db[user_id] = user_watchlist
+    if symbol not in db[user_id]:
+        db[user_id].append(symbol)
+        save_watchlist_db(db)
         update.message.reply_text(f"✅ `{symbol}` berhasil ditambahkan ke watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
     else:
         update.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
@@ -307,19 +325,17 @@ def remove_command(update: Update, context: CallbackContext):
         return
     symbol = context.args[0].upper()
     
-    if user_id in db:
-        user_watchlist = list(db[user_id])
-        if symbol in user_watchlist:
-            user_watchlist.remove(symbol)
-            db[user_id] = user_watchlist
-            update.message.reply_text(f"🗑️ `{symbol}` berhasil dihapus dari watchlist.", parse_mode=ParseMode.MARKDOWN)
-        else:
-            update.message.reply_text(f"❌ `{symbol}` tidak ditemukan di watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
+    db = load_watchlist_db()
+    if user_id in db and symbol in db[user_id]:
+        db[user_id].remove(symbol)
+        save_watchlist_db(db)
+        update.message.reply_text(f"🗑️ `{symbol}` berhasil dihapus dari watchlist.", parse_mode=ParseMode.MARKDOWN)
     else:
-        update.message.reply_text("🤷 Anda belum memiliki watchlist.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text(f"❌ `{symbol}` tidak ditemukan di watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
 
 def watchlist_command(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
+    db = load_watchlist_db()
     if user_id in db and db[user_id]:
         coins = ", ".join([f"`{c}`" for c in db[user_id]])
         update.message.reply_text(f"❤️ **Watchlist Anda:**\n{coins}", parse_mode=ParseMode.MARKDOWN)
@@ -363,12 +379,12 @@ def button_handler(update: Update, context: CallbackContext):
     elif action == "add":
         symbol = params
         user_id = str(query.from_user.id)
+        db = load_watchlist_db()
         if user_id not in db:
             db[user_id] = []
-        user_watchlist = list(db[user_id])
-        if symbol not in user_watchlist:
-            user_watchlist.append(symbol)
-            db[user_id] = user_watchlist
+        if symbol not in db[user_id]:
+            db[user_id].append(symbol)
+            save_watchlist_db(db)
             query.message.reply_text(f"✅ `{symbol}` berhasil ditambahkan ke watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
         else:
             query.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
@@ -379,7 +395,6 @@ def main():
         print("Error: TELEGRAM_TOKEN tidak diset.")
         return
     
-    # Jalankan web server di thread terpisah agar bot tidak diblokir
     web_thread = Thread(target=run_web_server)
     web_thread.start()
     
