@@ -3,10 +3,8 @@ name: Price Alert Checker
 
 on:
   schedule:
-    # Menjalankan setiap 15 menit
     - cron: '*/15 * * * *'
   workflow_dispatch:
-    # Menambahkan tombol "Run workflow" di tab Actions untuk tes manual
 
 jobs:
   check-prices-and-alert:
@@ -29,6 +27,6 @@ jobs:
     - name: Jalankan Skrip Peringatan Harga
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-        REPLIT_URL: ${{ secrets.REPLIT_URL }}
+        RAILWAY_URL: ${{ secrets.RAILWAY_URL }}
         API_SECRET_KEY: ${{ secrets.API_SECRET_KEY }}
       run: python alert_checker.py
