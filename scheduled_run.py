@@ -1,18 +1,18 @@
 # scheduled_run.py
-# SKRIP UNTUK DIJALANKAN OLEH GITHUB ACTIONS SESUAI JADWAL
+# VERSI FINAL UNTUK DIJALANKAN OLEH GITHUB ACTIONS
 import os
 import telegram
 from telegram import ParseMode, Bot
 
-# Impor fungsi inti dari main.py agar tidak duplikasi kode
-from main import generate_analysis_and_send
+# PERBAIKAN: Impor fungsi dengan nama yang benar dari main.py
+from main import generate_chart_and_caption
 
 # --- KONFIGURASI ---
 PAIR_TO_ANALYZE = 'BTC/USDT'
 TIMEFRAME_TO_ANALYZE = '4h'
 
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # Buat objek context tiruan sederhana untuk kompatibilitas
 class MockContext:
@@ -27,17 +27,29 @@ def run_scheduled_job():
 
     print(f"Memulai analisis terjadwal untuk {PAIR_TO_ANALYZE}...")
     bot = Bot(token=TELEGRAM_TOKEN)
-    mock_context = MockContext(bot)
-
+    
     try:
-        # Panggil fungsi inti dari main.py
-        generate_analysis_and_send(
-            chat_id=int(TELEGRAM_CHAT_ID),
+        # PERBAIKAN: Panggil fungsi dengan nama yang baru
+        filename, caption, symbol = generate_chart_and_caption(
             pair=PAIR_TO_ANALYZE,
-            timeframe=TIMEFRAME_TO_ANALYZE,
-            context=mock_context
+            timeframe=TIMEFRAME_TO_ANALYZE
         )
+        
+        if not filename:
+            print(f"Gagal menghasilkan chart: {caption}")
+            return
+
+        # Kirim foto dengan caption (tanpa tombol interaktif)
+        with open(filename, 'rb') as photo:
+            bot.send_photo(
+                chat_id=int(TELEGRAM_CHAT_ID),
+                photo=photo,
+                caption=caption,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        os.remove(filename)
         print("Analisis terjadwal berhasil dikirim.")
+
     except Exception as e:
         print(f"Terjadi kesalahan saat menjalankan tugas terjadwal: {e}")
         error_message = f"Gagal menjalankan analisis terjadwal untuk {PAIR_TO_ANALYZE}.\nError: `{e}`"
