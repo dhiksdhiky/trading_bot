@@ -1,5 +1,5 @@
 # scheduled_run.py
-# VERSI MANDIRI DENGAN SEMUA INDIKATOR TERBARU
+# VERSI MANDIRI DENGAN SEMUA INDIKATOR TERBARU DAN DATA NUMERIK
 import os
 import requests
 import ccxt
@@ -46,29 +46,44 @@ def analyze_indicators(df: pd.DataFrame):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     analysis = {}
-    if last['close'] > last['ma9'] and last['ma9'] > last['ma26']: analysis['ma'] = "🟢 Bullish"
-    elif last['close'] < last['ma9'] and last['ma9'] < last['ma26']: analysis['ma'] = "🔴 Bearish"
-    else: analysis['ma'] = "⚪ Netral"
-    if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought ({last['rsi']:.2f})"
-    elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold ({last['rsi']:.2f})"
-    else: analysis['rsi'] = f"⚪ Netral ({last['rsi']:.2f})"
-    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']: analysis['macd'] = "🟢 Golden Cross"
-    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']: analysis['macd'] = "🔴 Death Cross"
-    else: analysis['macd'] = "⚪ Netral"
+    
+    ma9_val = last['ma9']
+    ma26_val = last['ma26']
+    if ma9_val > ma26_val and last['close'] > ma9_val:
+        analysis['ma'] = f"🟢 Bullish (`{ma9_val:.2f}` > `{ma26_val:.2f}`)"
+    elif ma9_val < ma26_val and last['close'] < ma9_val:
+        analysis['ma'] = f"🔴 Bearish (`{ma9_val:.2f}` < `{ma26_val:.2f}`)"
+    else:
+        analysis['ma'] = "⚪ Netral"
+    
+    analysis['rsi'] = f"({last['rsi']:.2f})"
+    if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought {analysis['rsi']}"
+    elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold {analysis['rsi']}"
+    else: analysis['rsi'] = f"⚪ Netral {analysis['rsi']}"
+    
+    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']:
+        analysis['macd'] = "🟢 Golden Cross"
+    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']:
+        analysis['macd'] = "🔴 Death Cross"
+    else:
+        analysis['macd'] = "⚪ Netral"
+    
     analysis['bb_score'] = 0
     if last['close'] < last['bb_low']:
-        analysis['bb'] = "🟢 Harga di bawah Lower Band"
+        analysis['bb'] = f"🟢 Di bawah Lower Band (`{last['bb_low']:.2f}`)"
         analysis['bb_score'] = 1
     elif last['close'] > last['bb_high']:
-        analysis['bb'] = "🔴 Harga di atas Upper Band"
+        analysis['bb'] = f"🔴 Di atas Upper Band (`{last['bb_high']:.2f}`)"
         analysis['bb_score'] = -1
     else:
-        analysis['bb'] = "⚪ Harga di dalam Bands"
+        analysis['bb'] = "⚪ Di dalam Bands"
+        
     avg_volume = df['volume'].rolling(window=20).mean().iloc[-1]
-    if last['volume'] > avg_volume * 1.75:
-        analysis['volume'] = "🔥 Tinggi (Konfirmasi Tren)"
+    current_volume = last['volume']
+    if current_volume > avg_volume * 1.75:
+        analysis['volume'] = f"🔥 Tinggi (`{current_volume:,.0f}`)"
     else:
-        analysis['volume'] = "⚪ Normal"
+        analysis['volume'] = f"⚪ Normal (`{current_volume:,.0f}`)"
     return analysis
 
 def determine_final_signal(analysis: dict, sentiment: dict):
@@ -187,3 +202,4 @@ def run_scheduled_job():
 
 if __name__ == "__main__":
     run_scheduled_job()
+
