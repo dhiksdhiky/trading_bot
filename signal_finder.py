@@ -1,5 +1,5 @@
 # signal_finder.py
-# Mesin pemindai sinyal proaktif
+# Mesin pemindai sinyal proaktif (dengan perbaikan URL)
 import os
 import requests
 import ccxt
@@ -26,7 +26,12 @@ OPTIMAL_SETTINGS = {
 def get_user_data_from_api():
     """Mengambil data pengguna dari API di Railway."""
     try:
-        url = f"{RAILWAY_URL}/api/data?secret={API_SECRET_KEY}"
+        base_url = RAILWAY_URL
+        # PERBAIKAN: Pastikan URL memiliki skema https://
+        if not base_url.startswith(('http://', 'https://')):
+            base_url = 'https://' + base_url
+            
+        url = f"{base_url}/api/data?secret={API_SECRET_KEY}"
         response = requests.get(url, timeout=20)
         response.raise_for_status()
         return response.json()
