@@ -1,5 +1,5 @@
 # main.py
-# VERSI DENGAN AUTO-SIGNAL & STRATEGI KUSTOM
+# VERSI DENGAN STRATEGI GANDA (BULLISH & BEARISH)
 import os
 import requests
 import ccxt
@@ -315,7 +315,8 @@ def analyze_command(update: Update, context: CallbackContext):
 
 # --- HANDLER WATCHLIST & STRATEGI ---
 AVAILABLE_STRATEGIES = {
-    "pullback_buy": "Mencari sinyal beli saat terjadi koreksi (pullback) dalam sebuah tren naik yang kuat."
+    "pullback_buy": "Mencari sinyal beli saat terjadi koreksi dalam tren naik.",
+    "breakdown_sell": "Mencari sinyal jual saat harga menembus support dalam tren turun."
 }
 
 def add_command(update: Update, context: CallbackContext):
