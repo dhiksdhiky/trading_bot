@@ -1,0 +1,33 @@
+# .github/workflows/signal_scanner.yml
+name: Signal Scanner
+
+on:
+  schedule:
+    # Menjalankan setiap 5 menit
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scan-for-signals:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repositori
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Jalankan Skrip Pemindai Sinyal
+      env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        RAILWAY_URL: ${{ secrets.RAILWAY_URL }}
+        API_SECRET_KEY: ${{ secrets.API_SECRET_KEY }}
+      run: python signal_finder.py
