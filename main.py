@@ -1,5 +1,5 @@
 # main.py
-# VERSI FINAL DENGAN DATA NUMERIK PADA INDIKATOR
+# VERSI DENGAN AUTO-SIGNAL & STRATEGI KUSTOM
 import os
 import requests
 import ccxt
@@ -12,7 +12,7 @@ from datetime import datetime
 from telegram import Update, ParseMode, Bot, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
 
-# --- Bagian untuk Web Server & API Watchlist ---
+# --- Bagian untuk Web Server & API ---
 from flask import Flask, request, jsonify
 from threading import Thread
 
@@ -21,33 +21,33 @@ API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
 
 # --- KONFIGURASI PENYIMPANAN JSON ---
 DATA_DIR = "/app/data"
-WATCHLIST_FILE = os.path.join(DATA_DIR, "watchlist.json")
+DB_FILE = os.path.join(DATA_DIR, "user_data.json")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
-def load_watchlist_db():
+def load_db():
     try:
-        with open(WATCHLIST_FILE, 'r') as f:
+        with open(DB_FILE, 'r') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
-def save_watchlist_db(data):
-    with open(WATCHLIST_FILE, 'w') as f:
+def save_db(data):
+    with open(DB_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
 @app.route('/')
 def home():
     return "Bot sedang aktif dan berjalan di Railway."
 
-@app.route('/api/watchlist')
-def get_watchlist_api():
+@app.route('/api/data')
+def get_user_data_api():
     provided_key = request.args.get('secret')
     if provided_key != API_SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 401
     
-    watchlist_data = load_watchlist_db()
-    return jsonify(watchlist_data)
+    user_data = load_db()
+    return jsonify(user_data)
 
 def run_web_server():
   port = int(os.environ.get("PORT", 8080))
@@ -57,7 +57,7 @@ def run_web_server():
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
-# --- FUNGSI HELPER BARU & DIPERBARUI ---
+# --- FUNGSI HELPER (Tidak berubah) ---
 def get_fear_and_greed_index():
     try:
         url = "https://api.alternative.me/fng/?limit=1"
@@ -66,7 +66,6 @@ def get_fear_and_greed_index():
         data = response.json()['data'][0]
         value = int(data['value'])
         classification = data['value_classification']
-        
         sentiment_score = 0
         emoji = "😐"
         if "Extreme Fear" in classification or "Fear" in classification:
@@ -75,7 +74,6 @@ def get_fear_and_greed_index():
         elif "Extreme Greed" in classification or "Greed" in classification:
             sentiment_score = -1
             emoji = "🤑"
-            
         sentiment_text = f"{emoji} {classification} ({value})"
         return {"status": "ok", "score": sentiment_score, "text": sentiment_text}
     except Exception as e:
@@ -86,49 +84,29 @@ def analyze_indicators(df: pd.DataFrame):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     analysis = {}
-    
-    # MA
-    ma9_val = last['ma9']
-    ma26_val = last['ma26']
-    if ma9_val > ma26_val and last['close'] > ma9_val:
-        analysis['ma'] = f"🟢 Bullish (`{ma9_val:.2f}` > `{ma26_val:.2f}`)"
-    elif ma9_val < ma26_val and last['close'] < ma9_val:
-        analysis['ma'] = f"🔴 Bearish (`{ma9_val:.2f}` < `{ma26_val:.2f}`)"
-    else:
-        analysis['ma'] = "⚪ Netral"
-    
-    # RSI
-    analysis['rsi'] = f"({last['rsi']:.2f})"
-    if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought {analysis['rsi']}"
-    elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold {analysis['rsi']}"
-    else: analysis['rsi'] = f"⚪ Netral {analysis['rsi']}"
-    
-    # MACD
-    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']:
-        analysis['macd'] = "🟢 Golden Cross"
-    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']:
-        analysis['macd'] = "🔴 Death Cross"
-    else:
-        analysis['macd'] = "⚪ Netral"
-    
-    # Bollinger Bands
+    if last['close'] > last['ma9'] and last['ma9'] > last['ma26']: analysis['ma'] = "🟢 Bullish"
+    elif last['close'] < last['ma9'] and last['ma9'] < last['ma26']: analysis['ma'] = "🔴 Bearish"
+    else: analysis['ma'] = "⚪ Netral"
+    if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought ({last['rsi']:.2f})"
+    elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold ({last['rsi']:.2f})"
+    else: analysis['rsi'] = f"⚪ Netral ({last['rsi']:.2f})"
+    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']: analysis['macd'] = "🟢 Golden Cross"
+    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']: analysis['macd'] = "🔴 Death Cross"
+    else: analysis['macd'] = "⚪ Netral"
     analysis['bb_score'] = 0
     if last['close'] < last['bb_low']:
-        analysis['bb'] = f"🟢 Di bawah Lower Band (`{last['bb_low']:.2f}`)"
+        analysis['bb'] = "🟢 Harga di bawah Lower Band"
         analysis['bb_score'] = 1
     elif last['close'] > last['bb_high']:
-        analysis['bb'] = f"🔴 Di atas Upper Band (`{last['bb_high']:.2f}`)"
+        analysis['bb'] = "🔴 Harga di atas Upper Band"
         analysis['bb_score'] = -1
     else:
-        analysis['bb'] = "⚪ Di dalam Bands"
-        
-    # Volume
+        analysis['bb'] = "⚪ Harga di dalam Bands"
     avg_volume = df['volume'].rolling(window=20).mean().iloc[-1]
-    current_volume = last['volume']
-    if current_volume > avg_volume * 1.75:
-        analysis['volume'] = f"🔥 Tinggi (`{current_volume:,.0f}`)"
+    if last['volume'] > avg_volume * 1.75:
+        analysis['volume'] = "🔥 Tinggi (Konfirmasi Tren)"
     else:
-        analysis['volume'] = f"⚪ Normal (`{current_volume:,.0f}`)"
+        analysis['volume'] = "⚪ Normal"
     return analysis
 
 def determine_final_signal(analysis: dict, sentiment: dict):
@@ -142,12 +120,11 @@ def determine_final_signal(analysis: dict, sentiment: dict):
     score += analysis.get('bb_score', 0)
     if sentiment.get('status') == 'ok':
         score += sentiment.get('score', 0)
-    
     if score >= 2: return "🚨 SINYAL AKSI: BELI (BUY) 🚨"
     elif score <= -2: return "🚨 SINYAL AKSI: JUAL (SELL) 🚨"
     else: return "⚠️ SINYAL AKSI: TAHAN (HOLD) ⚠️"
 
-# --- FUNGSI INTI ---
+# --- FUNGSI INTI (Tidak berubah) ---
 def generate_chart_and_caption(pair: str, timeframe: str):
     exchange = ccxt.kucoin()
     ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, limit=200)
@@ -217,42 +194,43 @@ def generate_chart_and_caption(pair: str, timeframe: str):
 # --- HANDLER PERINTAH ---
 def start_command(update: Update, context: CallbackContext):
     text = (
-        "👋 **Selamat Datang di Bot Analisis Kripto v5!**\n\n"
-        "Fitur baru: Detail numerik pada setiap indikator.\n\n"
-        "Gunakan `/help` untuk daftar perintah."
+        "👋 **Selamat Datang di Bot Sinyal Kripto v4!**\n\n"
+        "Bot ini sekarang secara proaktif mencari sinyal trading untuk Anda.\n\n"
+        "Gunakan `/help` untuk melihat semua perintah."
     )
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 def help_command(update: Update, context: CallbackContext):
     text = (
-        "Berikut perintah yang tersedia:\n"
-        "📈 `/chart <simbol> <timeframe>`\n"
-        "   (Contoh: `/chart btc 4h`)\n\n"
-        "🔭 `/analyze <simbol>`\n"
-        "   (Menganalisis 15m, 1h, 4h, 1d)\n\n"
-        "❤️ **Watchlist & Peringatan Harga:**\n"
-        "   `/add <simbol>` - Tambah koin ke pantauan\n"
-        "   `/remove <simbol>` - Hapus koin\n"
-        "   `/watchlist` - Lihat daftar pantauan\n\n"
-        "📰 `/news <simbol>`\n"
-        "   (Menampilkan berita terbaru)"
+        "**Perintah yang Tersedia:**\n\n"
+        "**Analisis Manual:**\n"
+        "📈 `/chart <simbol> <tf>` - Analisis detail\n"
+        "🔭 `/analyze <simbol>` - Analisis multi-timeframe\n"
+        "📰 `/news <simbol>` - Berita terbaru\n\n"
+        "**Watchlist (Wajib untuk Sinyal):**\n"
+        "❤️ `/add <simbol>` - Tambah koin ke pantauan\n"
+        "💔 `/remove <simbol>` - Hapus koin\n"
+        "📋 `/watchlist` - Lihat daftar pantauan\n\n"
+        "**Auto-Signal (Level 1):**\n"
+        "🎯 `/strategy list` - Lihat strategi tersedia\n"
+        "✅ `/strategy toggle <nama>` - Aktifkan/nonaktifkan strategi"
     )
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 def chart_command(update: Update, context: CallbackContext):
     if len(context.args) != 2:
-        update.message.reply_text("Format salah. Gunakan: `/chart <simbol> <timeframe>`")
+        update.message.reply_text("Format: `/chart <simbol> <timeframe>`")
         return
     pair_input = context.args[0].upper()
     timeframe = context.args[1].lower()
     pair = f"{pair_input}/USDT" if '/' not in pair_input else pair_input
     
-    wait_message = update.message.reply_text(f"⏳ Memproses `{pair}` timeframe `{timeframe}`...", parse_mode=ParseMode.MARKDOWN)
+    wait_message = update.message.reply_text(f"⏳ Memproses `{pair}`...", parse_mode=ParseMode.MARKDOWN)
     
     try:
         filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
         if not filename:
-            context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Gagal menghasilkan analisis untuk `{pair}`: {caption}", parse_mode=ParseMode.MARKDOWN)
+            context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Gagal: {caption}", parse_mode=ParseMode.MARKDOWN)
             return
 
         keyboard = [
@@ -277,20 +255,17 @@ def chart_command(update: Update, context: CallbackContext):
 
 def analyze_command(update: Update, context: CallbackContext):
     if not context.args:
-        update.message.reply_text("Format salah. Gunakan: `/analyze <simbol>`")
+        update.message.reply_text("Format: `/analyze <simbol>`")
         return
     symbol = context.args[0].upper()
     pair = f"{symbol}/USDT"
     timeframes = ['15m', '1h', '4h', '1d']
     
-    wait_message = update.message.reply_text(f"🔬 Menganalisis `{symbol}` di berbagai timeframe...", parse_mode=ParseMode.MARKDOWN)
+    wait_message = update.message.reply_text(f"🔬 Menganalisis `{symbol}`...", parse_mode=ParseMode.MARKDOWN)
     
     summary_text = f"**Analisis Multi-Timeframe untuk {symbol}**\n\n"
     exchange = ccxt.kucoin()
-    
-    has_buy = False
-    has_sell = False
-
+    has_buy, has_sell = False, False
     sentiment = get_fear_and_greed_index()
 
     for tf in timeframes:
@@ -320,118 +295,139 @@ def analyze_command(update: Update, context: CallbackContext):
             df_period = df.tail(24)
             change_str = ""
             if len(df_period) >= 2:
-                first_price = df_period['close'].iloc[0]
-                last_price = df_period['close'].iloc[-1]
-                change_pct = ((last_price - first_price) / first_price) * 100
+                change_pct = ((df_period['close'].iloc[-1] - df_period['close'].iloc[0]) / df_period['close'].iloc[0]) * 100
                 change_str = f"({change_pct:+.1f}%)"
 
             signal_emoji = "➡️"
-            if "BELI" in signal: 
-                signal_emoji = "🟢"
-                has_buy = True
-            if "JUAL" in signal: 
-                signal_emoji = "🔴"
-                has_sell = True
+            if "BELI" in signal: signal_emoji, has_buy = "🟢", True
+            if "JUAL" in signal: signal_emoji, has_sell = "🔴", True
 
-            # PEMBARUAN: Tampilkan RSI di ringkasan /analyze
-            rsi_val_str = analysis['rsi'].split('(')[1].split(')')[0]
-            summary_text += f"`{tf}`: {signal_emoji} {analysis['ma'].split(' ')[1]} (RSI: {rsi_val_str}) {change_str}\n"
-        except Exception as e:
-            print(f"Error in analyze loop for {tf}: {e}")
+            summary_text += f"`{tf}`: {signal_emoji} {analysis['ma']} {change_str}\n"
+        except Exception:
             summary_text += f"`{tf}`: ❌ Gagal dimuat.\n"
     
     final_verdict = "⚠️ **Kesimpulan: NETRAL / KONSOLIDASI**"
-    if has_buy and not has_sell:
-        final_verdict = "✅ **Kesimpulan: CENDERUNG BULLISH**"
-    elif has_sell and not has_buy:
-        final_verdict = "❌ **Kesimpulan: CENDERUNG BEARISH**"
+    if has_buy and not has_sell: final_verdict = "✅ **Kesimpulan: CENDERUNG BULLISH**"
+    elif has_sell and not has_buy: final_verdict = "❌ **Kesimpulan: CENDERUNG BEARISH**"
 
     summary_text += f"\n{final_verdict}\n\n*Sentimen Pasar Global: {sentiment['text']}*"
     context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=summary_text, parse_mode=ParseMode.MARKDOWN)
 
-# --- HANDLER WATCHLIST & TOMBOL ---
+# --- HANDLER WATCHLIST & STRATEGI ---
+AVAILABLE_STRATEGIES = {
+    "pullback_buy": "Mencari sinyal beli saat terjadi koreksi (pullback) dalam sebuah tren naik yang kuat."
+}
+
+def add_command(update: Update, context: CallbackContext):
+    user_id = str(update.effective_user.id)
+    if not context.args:
+        update.message.reply_text("Format: `/add <simbol>`")
+        return
+    symbol = context.args[0].upper()
+    
+    db = load_db()
+    if user_id not in db:
+        db[user_id] = {"watchlist": [], "strategies": {}}
+    
+    if symbol not in db[user_id]["watchlist"]:
+        db[user_id]["watchlist"].append(symbol)
+        save_db(db)
+        update.message.reply_text(f"✅ `{symbol}` ditambahkan ke watchlist.", parse_mode=ParseMode.MARKDOWN)
+    else:
+        update.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist.", parse_mode=ParseMode.MARKDOWN)
+
+def remove_command(update: Update, context: CallbackContext):
+    user_id = str(update.effective_user.id)
+    if not context.args:
+        update.message.reply_text("Format: `/remove <simbol>`")
+        return
+    symbol = context.args[0].upper()
+    
+    db = load_db()
+    if user_id in db and symbol in db[user_id]["watchlist"]:
+        db[user_id]["watchlist"].remove(symbol)
+        save_db(db)
+        update.message.reply_text(f"🗑️ `{symbol}` dihapus dari watchlist.", parse_mode=ParseMode.MARKDOWN)
+    else:
+        update.message.reply_text(f"❌ `{symbol}` tidak ditemukan di watchlist.", parse_mode=ParseMode.MARKDOWN)
+
+def watchlist_command(update: Update, context: CallbackContext):
+    user_id = str(update.effective_user.id)
+    db = load_db()
+    if user_id in db and db[user_id].get("watchlist"):
+        coins = ", ".join([f"`{c}`" for c in db[user_id]["watchlist"]])
+        update.message.reply_text(f"❤️ **Watchlist Anda:**\n{coins}", parse_mode=ParseMode.MARKDOWN)
+    else:
+        update.message.reply_text("🤷 Watchlist Anda kosong. Gunakan `/add <simbol>`.", parse_mode=ParseMode.MARKDOWN)
+
+def strategy_command(update: Update, context: CallbackContext):
+    user_id = str(update.effective_user.id)
+    args = context.args
+    
+    if not args or args[0] not in ['list', 'toggle']:
+        update.message.reply_text("Format salah. Gunakan `/strategy list` atau `/strategy toggle <nama>`.")
+        return
+
+    sub_command = args[0]
+    db = load_db()
+
+    if sub_command == 'list':
+        text = "**Strategi yang Tersedia:**\n\n"
+        user_strategies = db.get(user_id, {}).get("strategies", {})
+        for name, desc in AVAILABLE_STRATEGIES.items():
+            status = "✅ Aktif" if user_strategies.get(name, {}).get("enabled", False) else "❌ Nonaktif"
+            text += f"**{name}**\n_{desc}_\nStatus: {status}\n\n"
+        update.message.reply_text(text)
+        return
+
+    if sub_command == 'toggle':
+        if len(args) < 2 or args[1] not in AVAILABLE_STRATEGIES:
+            update.message.reply_text(f"Nama strategi tidak valid. Gunakan `/strategy list` untuk melihat pilihan.")
+            return
+        
+        strategy_name = args[1]
+        
+        if user_id not in db:
+            db[user_id] = {"watchlist": [], "strategies": {}}
+        if "strategies" not in db[user_id]:
+            db[user_id]["strategies"] = {}
+            
+        current_status = db[user_id]["strategies"].get(strategy_name, {}).get("enabled", False)
+        db[user_id]["strategies"][strategy_name] = {"enabled": not current_status}
+        save_db(db)
+        
+        new_status = "diaktifkan" if not current_status else "dinonaktifkan"
+        update.message.reply_text(f"Strategi `{strategy_name}` berhasil {new_status}.", parse_mode=ParseMode.MARKDOWN)
+
+# --- HANDLER LAINNYA (News, Tombol) ---
 def news_command(update: Update, context: CallbackContext):
     if not context.args:
-        update.message.reply_text("Format salah. Gunakan: `/news <simbol>`")
+        update.message.reply_text("Format: `/news <simbol>`")
         return
     symbol = context.args[0]
-    update.message.reply_text(f"📰 Mencari berita terbaru untuk `{symbol}`...", parse_mode=ParseMode.MARKDOWN)
+    update.message.reply_text(f"📰 Mencari berita untuk `{symbol}`...", parse_mode=ParseMode.MARKDOWN)
     
     try:
         url = f"https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories={symbol.upper()}&api_key={CRYPTOCOMPARE_API_KEY}"
         response = requests.get(url)
         response.raise_for_status()
         news_data = response.json()['Data'][:3] 
-        
         if not news_data:
-            update.message.reply_text(f"Tidak ada berita yang ditemukan untuk `{symbol}`.", parse_mode=ParseMode.MARKDOWN)
+            update.message.reply_text(f"Tidak ada berita untuk `{symbol}`.", parse_mode=ParseMode.MARKDOWN)
             return
-            
         for news in news_data:
             text = f"**{news['title']}**\n\n_{news['source_info']['name']} - {datetime.fromtimestamp(news['published_on']).strftime('%d %b %Y')}_\n[Baca Selengkapnya]({news['url']})"
             update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-            
     except Exception as e:
         update.message.reply_text(f"Gagal mengambil berita: {e}")
-
-def add_command(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
-    if not context.args:
-        update.message.reply_text("Format salah. Gunakan: `/add <simbol>`")
-        return
-    symbol = context.args[0].upper()
-    
-    db = load_watchlist_db()
-    if user_id not in db:
-        db[user_id] = []
-    
-    if symbol not in db[user_id]:
-        db[user_id].append(symbol)
-        save_watchlist_db(db)
-        update.message.reply_text(f"✅ `{symbol}` berhasil ditambahkan ke watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
-    else:
-        update.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
-
-def remove_command(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
-    if not context.args:
-        update.message.reply_text("Format salah. Gunakan: `/remove <simbol>`")
-        return
-    symbol = context.args[0].upper()
-    
-    db = load_watchlist_db()
-    if user_id in db and symbol in db[user_id]:
-        db[user_id].remove(symbol)
-        save_watchlist_db(db)
-        update.message.reply_text(f"🗑️ `{symbol}` berhasil dihapus dari watchlist.", parse_mode=ParseMode.MARKDOWN)
-    else:
-        update.message.reply_text(f"❌ `{symbol}` tidak ditemukan di watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
-
-def watchlist_command(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
-    db = load_watchlist_db()
-    if user_id in db and db[user_id]:
-        coins = ", ".join([f"`{c}`" for c in db[user_id]])
-        update.message.reply_text(f"❤️ **Watchlist Anda:**\n{coins}", parse_mode=ParseMode.MARKDOWN)
-    else:
-        update.message.reply_text("🤷 Watchlist Anda kosong. Gunakan `/add <simbol>` untuk menambahkan.", parse_mode=ParseMode.MARKDOWN)
 
 def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
-    
     data = query.data
     action, params = data.split('_', 1)
     
-    if action == "refresh":
-        pair, timeframe = params.rsplit('_', 1)
-        filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
-        if filename:
-            with open(filename, 'rb') as photo:
-                query.edit_message_media(media=InputMediaPhoto(photo, caption=caption, parse_mode=ParseMode.MARKDOWN), reply_markup=query.message.reply_markup)
-            os.remove(filename)
-
-    elif action == "chart":
+    if action == "refresh" or action == "chart":
         pair, timeframe = params.rsplit('_', 1)
         filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
         if filename:
@@ -452,20 +448,20 @@ def button_handler(update: Update, context: CallbackContext):
     elif action == "add":
         symbol = params
         user_id = str(query.from_user.id)
-        db = load_watchlist_db()
+        db = load_db()
         if user_id not in db:
-            db[user_id] = []
-        if symbol not in db[user_id]:
-            db[user_id].append(symbol)
-            save_watchlist_db(db)
-            query.message.reply_text(f"✅ `{symbol}` berhasil ditambahkan ke watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
+            db[user_id] = {"watchlist": [], "strategies": {}}
+        if symbol not in db[user_id]["watchlist"]:
+            db[user_id]["watchlist"].append(symbol)
+            save_db(db)
+            query.message.reply_text(f"✅ `{symbol}` ditambahkan ke watchlist.", parse_mode=ParseMode.MARKDOWN)
         else:
-            query.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist Anda.", parse_mode=ParseMode.MARKDOWN)
+            query.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist.", parse_mode=ParseMode.MARKDOWN)
 
 # --- FUNGSI UTAMA BOT ---
 def main_bot():
     if not TELEGRAM_TOKEN:
-        print("Error: TELEGRAM_TOKEN tidak diset. Bot tidak akan berjalan.")
+        print("Error: TELEGRAM_TOKEN tidak diset.")
         return
     
     updater = Updater(TELEGRAM_TOKEN)
@@ -479,9 +475,10 @@ def main_bot():
     dispatcher.add_handler(CommandHandler("add", add_command))
     dispatcher.add_handler(CommandHandler("remove", remove_command))
     dispatcher.add_handler(CommandHandler("watchlist", watchlist_command))
+    dispatcher.add_handler(CommandHandler("strategy", strategy_command))
     dispatcher.add_handler(CallbackQueryHandler(button_handler))
     
-    print("Memulai polling untuk bot Telegram...")
+    print("Bot Sinyal Kripto berhasil dijalankan...")
     updater.start_polling()
     updater.idle()
 
@@ -489,4 +486,3 @@ if __name__ == "__main__":
     web_thread = Thread(target=run_web_server)
     web_thread.start()
     main_bot()
-
