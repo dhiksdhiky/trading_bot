@@ -1,5 +1,5 @@
 # main.py
-# VERSI DENGAN PENGGABUNGAN ANALISIS AI KE PERINTAH UTAMA
+# VERSI DENGAN PERBAIKAN DAFTAR STRATEGI
 import os
 import requests
 import ccxt
@@ -18,7 +18,6 @@ from threading import Thread
 
 app = Flask('')
 API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # --- KONFIGURASI PENYIMPANAN JSON ---
 DATA_DIR = "/app/data"
@@ -58,21 +57,7 @@ def run_web_server():
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
-# --- FUNGSI HELPER ---
-def get_gemini_analysis(prompt: str):
-    if not GEMINI_API_KEY:
-        return "Analisis AI tidak tersedia (API Key tidak dikonfigurasi)."
-    try:
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-        response = requests.post(api_url, json=payload, timeout=45)
-        response.raise_for_status()
-        result = response.json()
-        return result['candidates'][0]['content']['parts'][0]['text']
-    except Exception as e:
-        print(f"Error saat berkomunikasi dengan Gemini: {e}")
-        return "Gagal mendapatkan analisis dari AI."
-
+# --- FUNGSI HELPER (Tidak berubah) ---
 def get_fear_and_greed_index():
     try:
         url = "https://api.alternative.me/fng/?limit=1"
@@ -99,8 +84,8 @@ def analyze_indicators(df: pd.DataFrame):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     analysis = {}
-    if last['close'] > last['ma9'] and last['ma9'] > last['ma26']: analysis['ma'] = f"🟢 Bullish ({last['ma9']:.2f} > {last['ma26']:.2f})"
-    elif last['close'] < last['ma9'] and last['ma9'] < last['ma26']: analysis['ma'] = f"🔴 Bearish ({last['ma9']:.2f} < {last['ma26']:.2f})"
+    if last['close'] > last['ma9'] and last['ma9'] > last['ma26']: analysis['ma'] = "🟢 Bullish"
+    elif last['close'] < last['ma9'] and last['ma9'] < last['ma26']: analysis['ma'] = "🔴 Bearish"
     else: analysis['ma'] = "⚪ Netral"
     if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought ({last['rsi']:.2f})"
     elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold ({last['rsi']:.2f})"
@@ -110,18 +95,18 @@ def analyze_indicators(df: pd.DataFrame):
     else: analysis['macd'] = "⚪ Netral"
     analysis['bb_score'] = 0
     if last['close'] < last['bb_low']:
-        analysis['bb'] = f"🟢 Di bawah Lower Band ({last['bb_low']:.2f})"
+        analysis['bb'] = "🟢 Harga di bawah Lower Band"
         analysis['bb_score'] = 1
     elif last['close'] > last['bb_high']:
-        analysis['bb'] = f"🔴 Di atas Upper Band ({last['bb_high']:.2f})"
+        analysis['bb'] = "🔴 Harga di atas Upper Band"
         analysis['bb_score'] = -1
     else:
-        analysis['bb'] = "⚪ Di dalam Bands"
+        analysis['bb'] = "⚪ Harga di dalam Bands"
     avg_volume = df['volume'].rolling(window=20).mean().iloc[-1]
     if last['volume'] > avg_volume * 1.75:
-        analysis['volume'] = f"🔥 Tinggi ({last['volume']:,.0f})"
+        analysis['volume'] = "🔥 Tinggi (Konfirmasi Tren)"
     else:
-        analysis['volume'] = f"⚪ Normal ({last['volume']:,.0f})"
+        analysis['volume'] = "⚪ Normal"
     return analysis
 
 def determine_final_signal(analysis: dict, sentiment: dict):
@@ -139,7 +124,7 @@ def determine_final_signal(analysis: dict, sentiment: dict):
     elif score <= -2: return "🚨 SINYAL AKSI: JUAL (SELL) 🚨"
     else: return "⚠️ SINYAL AKSI: TAHAN (HOLD) ⚠️"
 
-# --- FUNGSI INTI ---
+# --- FUNGSI INTI (Tidak berubah) ---
 def generate_chart_and_caption(pair: str, timeframe: str):
     exchange = ccxt.kucoin()
     ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, limit=200)
@@ -174,19 +159,6 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     change_emoji = "📈" if change_pct >= 0 else "📉"
     change_str = f"{change_emoji} {change_pct:+.2f}%"
 
-    # PEMBARUAN: Panggil AI untuk analisis naratif
-    prompt = f"""
-    Anda adalah seorang analis teknikal kripto profesional. Berikan ringkasan analisis pasar yang singkat dan padat (maksimal 3 kalimat) dalam bahasa Indonesia berdasarkan data berikut untuk {pair} timeframe {timeframe}.
-    Data Indikator:
-    - Moving Average: {indicator_analysis['ma']}
-    - RSI: {indicator_analysis['rsi']}
-    - MACD: {indicator_analysis['macd']}
-    - Bollinger Bands: {indicator_analysis['bb']}
-    - Volume: {indicator_analysis['volume']}
-    Fokus pada kesimpulan utama dari kombinasi indikator ini.
-    """
-    ai_summary = get_gemini_analysis(prompt)
-
     mc = mpf.make_marketcolors(up='#41a35a', down='#d74a43', wick={'up':'#41a35a','down':'#d74a43'}, volume={'up':'#41a35a','down':'#d74a43'})
     s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', gridstyle='-')
     
@@ -204,7 +176,6 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     filename = f'analysis_{pair.replace("/", "")}_{timeframe}.png'
     mpf.plot(df_for_plot, type='candle', style=s, title=f'Analisis {pair} - Timeframe {timeframe}', ylabel='Harga (USDT)', volume=True, mav=(9, 26), addplot=addplots, panel_ratios=(8, 3, 3), figscale=1.5, savefig=filename)
     
-    # PEMBARUAN: Bangun caption dengan format baru
     caption = (
         f"📊 **Analisis: {pair} | {timeframe} ({change_str})**\n"
         f"*(Harga: `${harga_terkini:,.2f}` pada {waktu_sekarang})*\n\n"
@@ -214,7 +185,6 @@ def generate_chart_and_caption(pair: str, timeframe: str):
         f"3. **MACD**: {indicator_analysis['macd']}\n"
         f"4. **Bollinger Bands**: {indicator_analysis['bb']}\n"
         f"5. **Volume**: {indicator_analysis['volume']}\n\n"
-        f"**🧠 Analisis AI:**\n_{ai_summary}_\n\n"
         f"**Sentimen Pasar**: {sentiment_analysis['text']}\n"
         f"------------------------------------\n"
         f"**{final_signal}**"
@@ -224,8 +194,8 @@ def generate_chart_and_caption(pair: str, timeframe: str):
 # --- HANDLER PERINTAH ---
 def start_command(update: Update, context: CallbackContext):
     text = (
-        "👋 **Selamat Datang di Bot Sinyal Kripto v5 (AI Enhanced)!**\n\n"
-        "Analisis AI sekarang terintegrasi langsung di setiap perintah `/chart` dan `/analyze`.\n\n"
+        "👋 **Selamat Datang di Bot Sinyal Kripto v4!**\n\n"
+        "Bot ini sekarang secara proaktif mencari sinyal trading untuk Anda.\n\n"
         "Gunakan `/help` untuk melihat semua perintah."
     )
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
@@ -234,14 +204,14 @@ def help_command(update: Update, context: CallbackContext):
     text = (
         "**Perintah yang Tersedia:**\n\n"
         "**Analisis Manual:**\n"
-        "📈 `/chart <simbol> <tf>` - Analisis detail dengan AI\n"
-        "🔭 `/analyze <simbol>` - Analisis multi-timeframe dengan AI\n"
-        "📰 `/news [simbol]` - Berita umum atau spesifik\n\n"
+        "📈 `/chart <simbol> <tf>` - Analisis detail\n"
+        "🔭 `/analyze <simbol>` - Analisis multi-timeframe\n"
+        "📰 `/news <simbol>` - Berita terbaru\n\n"
         "**Watchlist (Wajib untuk Sinyal):**\n"
         "❤️ `/add <simbol>` - Tambah koin ke pantauan\n"
         "💔 `/remove <simbol>` - Hapus koin\n"
         "📋 `/watchlist` - Lihat daftar pantauan\n\n"
-        "**Auto-Signal:**\n"
+        "**Auto-Signal (Level 1):**\n"
         "🎯 `/strategy list` - Lihat strategi tersedia\n"
         "✅ `/strategy toggle <nama>` - Aktifkan/nonaktifkan strategi"
     )
@@ -255,7 +225,7 @@ def chart_command(update: Update, context: CallbackContext):
     timeframe = context.args[1].lower()
     pair = f"{pair_input}/USDT" if '/' not in pair_input else pair_input
     
-    wait_message = update.message.reply_text(f"⏳ Menganalisis `{pair}` dengan AI...", parse_mode=ParseMode.MARKDOWN)
+    wait_message = update.message.reply_text(f"⏳ Memproses `{pair}`...", parse_mode=ParseMode.MARKDOWN)
     
     try:
         filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
@@ -291,15 +261,12 @@ def analyze_command(update: Update, context: CallbackContext):
     pair = f"{symbol}/USDT"
     timeframes = ['15m', '1h', '4h', '1d']
     
-    wait_message = update.message.reply_text(f"🔬 Menganalisis `{symbol}` dengan AI...", parse_mode=ParseMode.MARKDOWN)
+    wait_message = update.message.reply_text(f"🔬 Menganalisis `{symbol}`...", parse_mode=ParseMode.MARKDOWN)
     
     summary_text = f"**Analisis Multi-Timeframe untuk {symbol}**\n\n"
     exchange = ccxt.kucoin()
     has_buy, has_sell = False, False
     sentiment = get_fear_and_greed_index()
-    
-    # Kumpulkan data teknikal untuk AI
-    technical_data_for_ai = ""
 
     for tf in timeframes:
         try:
@@ -336,53 +303,22 @@ def analyze_command(update: Update, context: CallbackContext):
             if "JUAL" in signal: signal_emoji, has_sell = "🔴", True
 
             summary_text += f"`{tf}`: {signal_emoji} {analysis['ma']} {change_str}\n"
-            technical_data_for_ai += f"- Timeframe {tf}: Tren {analysis['ma']}, RSI {analysis['rsi']}, MACD {analysis['macd']}\n"
         except Exception:
             summary_text += f"`{tf}`: ❌ Gagal dimuat.\n"
     
-    # Panggil AI untuk kesimpulan akhir
-    prompt = f"""
-    Anda adalah seorang analis teknikal kripto profesional. Berikan kesimpulan pasar secara umum untuk {symbol} (maksimal 2 kalimat) berdasarkan ringkasan data multi-timeframe berikut:
-    {technical_data_for_ai}
-    """
-    ai_summary = get_gemini_analysis(prompt)
-
     final_verdict = "⚠️ **Kesimpulan: NETRAL / KONSOLIDASI**"
     if has_buy and not has_sell: final_verdict = "✅ **Kesimpulan: CENDERUNG BULLISH**"
     elif has_sell and not has_buy: final_verdict = "❌ **Kesimpulan: CENDERUNG BEARISH**"
 
-    summary_text += f"\n{final_verdict}\n\n**🧠 Analisis AI:**\n_{ai_summary}_\n\n*Sentimen Pasar Global: {sentiment['text']}*"
+    summary_text += f"\n{final_verdict}\n\n*Sentimen Pasar Global: {sentiment['text']}*"
     context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=summary_text, parse_mode=ParseMode.MARKDOWN)
 
-# --- HANDLER WATCHLIST, STRATEGI & BERITA ---
-def news_command(update: Update, context: CallbackContext):
-    base_url = f"https://min-api.cryptocompare.com/data/v2/news/?lang=EN&api_key={CRYPTOCOMPARE_API_KEY}"
-    
-    if not context.args:
-        topic = "umum"
-        url = base_url
-    else:
-        symbol = context.args[0].upper()
-        topic = f"`{symbol}`"
-        url = f"{base_url}&categories={symbol}"
-
-    update.message.reply_text(f"📰 Mencari berita {topic}...", parse_mode=ParseMode.MARKDOWN)
-    
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        news_data = response.json()['Data'][:3]
-        
-        if not news_data:
-            update.message.reply_text(f"Tidak ada berita yang ditemukan untuk {topic}.", parse_mode=ParseMode.MARKDOWN)
-            return
-            
-        for news in news_data:
-            text = f"**{news['title']}**\n\n_{news['source_info']['name']} - {datetime.fromtimestamp(news['published_on']).strftime('%d %b %Y')}_\n[Baca Selengkapnya]({news['url']})"
-            update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-            
-    except Exception as e:
-        update.message.reply_text(f"Gagal mengambil berita: {e}")
+# --- HANDLER WATCHLIST & STRATEGI ---
+# PERBAIKAN: Tambahkan strategi baru ke daftar
+AVAILABLE_STRATEGIES = {
+    "pullback_buy": "Mencari sinyal beli saat terjadi koreksi dalam tren naik.",
+    "breakdown_sell": "Mencari sinyal jual saat harga menembus support dalam tren turun."
+}
 
 def add_command(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
@@ -429,9 +365,6 @@ def watchlist_command(update: Update, context: CallbackContext):
 def strategy_command(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     args = context.args
-    AVAILABLE_STRATEGIES = {
-        "pullback_buy": "Mencari sinyal beli saat terjadi koreksi dalam tren naik."
-    }
     
     if not args or args[0] not in ['list', 'toggle']:
         update.message.reply_text("Format salah. Gunakan `/strategy list` atau `/strategy toggle <nama>`.")
@@ -467,6 +400,28 @@ def strategy_command(update: Update, context: CallbackContext):
         
         new_status = "diaktifkan" if not current_status else "dinonaktifkan"
         update.message.reply_text(f"Strategi `{strategy_name}` berhasil {new_status}.", parse_mode=ParseMode.MARKDOWN)
+
+# --- HANDLER LAINNYA (News, Tombol) ---
+def news_command(update: Update, context: CallbackContext):
+    if not context.args:
+        update.message.reply_text("Format: `/news <simbol>`")
+        return
+    symbol = context.args[0]
+    update.message.reply_text(f"📰 Mencari berita untuk `{symbol}`...", parse_mode=ParseMode.MARKDOWN)
+    
+    try:
+        url = f"https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories={symbol.upper()}&api_key={CRYPTOCOMPARE_API_KEY}"
+        response = requests.get(url)
+        response.raise_for_status()
+        news_data = response.json()['Data'][:3] 
+        if not news_data:
+            update.message.reply_text(f"Tidak ada berita untuk `{symbol}`.", parse_mode=ParseMode.MARKDOWN)
+            return
+        for news in news_data:
+            text = f"**{news['title']}**\n\n_{news['source_info']['name']} - {datetime.fromtimestamp(news['published_on']).strftime('%d %b %Y')}_\n[Baca Selengkapnya]({news['url']})"
+            update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+    except Exception as e:
+        update.message.reply_text(f"Gagal mengambil berita: {e}")
 
 def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -525,7 +480,7 @@ def main_bot():
     dispatcher.add_handler(CommandHandler("strategy", strategy_command))
     dispatcher.add_handler(CallbackQueryHandler(button_handler))
     
-    print("Bot Sinyal Kripto (AI Enhanced) berhasil dijalankan...")
+    print("Bot Sinyal Kripto berhasil dijalankan...")
     updater.start_polling()
     updater.idle()
 
