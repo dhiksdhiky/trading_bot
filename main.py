@@ -1,5 +1,5 @@
 # main.py
-# VERSI DENGAN STRATEGI GANDA (BULLISH & BEARISH)
+# VERSI DENGAN INTEGRASI GEMINI AI & PEMBARUAN PERINTAH /NEWS
 import os
 import requests
 import ccxt
@@ -18,6 +18,7 @@ from threading import Thread
 
 app = Flask('')
 API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # --- KONFIGURASI PENYIMPANAN JSON ---
 DATA_DIR = "/app/data"
@@ -57,7 +58,7 @@ def run_web_server():
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
-# --- FUNGSI HELPER (Tidak berubah) ---
+# --- FUNGSI HELPER ---
 def get_fear_and_greed_index():
     try:
         url = "https://api.alternative.me/fng/?limit=1"
@@ -79,6 +80,7 @@ def get_fear_and_greed_index():
     except Exception as e:
         print(f"Error di get_fear_and_greed_index: {e}")
         return {"status": "error", "message": "Gagal memuat F&G Index."}
+
 
 def analyze_indicators(df: pd.DataFrame):
     last = df.iloc[-1]
@@ -124,7 +126,7 @@ def determine_final_signal(analysis: dict, sentiment: dict):
     elif score <= -2: return "🚨 SINYAL AKSI: JUAL (SELL) 🚨"
     else: return "⚠️ SINYAL AKSI: TAHAN (HOLD) ⚠️"
 
-# --- FUNGSI INTI (Tidak berubah) ---
+# --- FUNGSI INTI ---
 def generate_chart_and_caption(pair: str, timeframe: str):
     exchange = ccxt.kucoin()
     ohlcv = exchange.fetch_ohlcv(pair, timeframe=timeframe, limit=200)
@@ -144,7 +146,7 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     df.dropna(inplace=True)
     
     if len(df) < 2:
-        return None, "Gagal menganalisis, data tidak cukup setelah diproses.", None
+        return None, "Gagal menganalisis, data tidak cukup setelah diproses.", None, None
 
     indicator_analysis = analyze_indicators(df)
     symbol = pair.split('/')[0]
@@ -189,13 +191,13 @@ def generate_chart_and_caption(pair: str, timeframe: str):
         f"------------------------------------\n"
         f"**{final_signal}**"
     )
-    return filename, caption, symbol
+    return filename, caption, symbol, indicator_analysis
 
 # --- HANDLER PERINTAH ---
 def start_command(update: Update, context: CallbackContext):
     text = (
-        "👋 **Selamat Datang di Bot Sinyal Kripto v4!**\n\n"
-        "Bot ini sekarang secara proaktif mencari sinyal trading untuk Anda.\n\n"
+        "👋 **Selamat Datang di Bot Sinyal Kripto v5 (AI Enhanced)!**\n\n"
+        "Bot ini sekarang ditenagai oleh Gemini AI untuk validasi sinyal dan analisis naratif.\n\n"
         "Gunakan `/help` untuk melihat semua perintah."
     )
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
@@ -205,13 +207,14 @@ def help_command(update: Update, context: CallbackContext):
         "**Perintah yang Tersedia:**\n\n"
         "**Analisis Manual:**\n"
         "📈 `/chart <simbol> <tf>` - Analisis detail\n"
+        "🧠 `/ai_analyze <simbol> <tf>` - Analisis naratif oleh AI\n"
         "🔭 `/analyze <simbol>` - Analisis multi-timeframe\n"
-        "📰 `/news <simbol>` - Berita terbaru\n\n"
+        "📰 `/news [simbol]` - Berita umum atau spesifik\n\n"
         "**Watchlist (Wajib untuk Sinyal):**\n"
         "❤️ `/add <simbol>` - Tambah koin ke pantauan\n"
         "💔 `/remove <simbol>` - Hapus koin\n"
         "📋 `/watchlist` - Lihat daftar pantauan\n\n"
-        "**Auto-Signal (Level 1):**\n"
+        "**Auto-Signal:**\n"
         "🎯 `/strategy list` - Lihat strategi tersedia\n"
         "✅ `/strategy toggle <nama>` - Aktifkan/nonaktifkan strategi"
     )
@@ -228,7 +231,7 @@ def chart_command(update: Update, context: CallbackContext):
     wait_message = update.message.reply_text(f"⏳ Memproses `{pair}`...", parse_mode=ParseMode.MARKDOWN)
     
     try:
-        filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
+        filename, caption, symbol, _ = generate_chart_and_caption(pair, timeframe)
         if not filename:
             context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Gagal: {caption}", parse_mode=ParseMode.MARKDOWN)
             return
@@ -240,7 +243,10 @@ def chart_command(update: Update, context: CallbackContext):
                 InlineKeyboardButton("4H", callback_data=f"chart_{pair}_4h"),
                 InlineKeyboardButton("1D", callback_data=f"chart_{pair}_1d"),
             ],
-            [InlineKeyboardButton("Tambah ke Watchlist ❤️", callback_data=f"add_{symbol}")],
+            [
+                InlineKeyboardButton("Tambah ke Watchlist ❤️", callback_data=f"add_{symbol}"),
+                InlineKeyboardButton("Analisis AI 🧠", callback_data=f"ai_analyze_{pair}_{timeframe}")
+            ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -313,11 +319,81 @@ def analyze_command(update: Update, context: CallbackContext):
     summary_text += f"\n{final_verdict}\n\n*Sentimen Pasar Global: {sentiment['text']}*"
     context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=summary_text, parse_mode=ParseMode.MARKDOWN)
 
-# --- HANDLER WATCHLIST & STRATEGI ---
-AVAILABLE_STRATEGIES = {
-    "pullback_buy": "Mencari sinyal beli saat terjadi koreksi dalam tren naik.",
-    "breakdown_sell": "Mencari sinyal jual saat harga menembus support dalam tren turun."
-}
+def ai_analyze_command(update: Update, context: CallbackContext):
+    if not context.args or len(context.args) != 2:
+        update.message.reply_text("Format: `/ai_analyze <simbol> <timeframe>`")
+        return
+    
+    pair_input = context.args[0].upper()
+    timeframe = context.args[1].lower()
+    pair = f"{pair_input}/USDT" if '/' not in pair_input else pair_input
+
+    wait_message = update.message.reply_text(f"🧠 Menganalisis `{pair}` dengan Gemini AI...", parse_mode=ParseMode.MARKDOWN)
+
+    try:
+        _, _, _, indicator_analysis = generate_chart_and_caption(pair, timeframe)
+
+        if not indicator_analysis:
+            context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text="Gagal mendapatkan data untuk analisis AI.")
+            return
+
+        prompt = f"""
+        Anda adalah seorang analis teknikal kripto profesional. Berikan ringkasan analisis pasar yang singkat dan padat (maksimal 3 kalimat) dalam bahasa Indonesia berdasarkan data berikut untuk {pair} timeframe {timeframe}.
+        
+        Data Indikator:
+        - Moving Average: {indicator_analysis['ma']}
+        - RSI: {indicator_analysis['rsi']}
+        - MACD: {indicator_analysis['macd']}
+        - Bollinger Bands: {indicator_analysis['bb']}
+        - Volume: {indicator_analysis['volume']}
+        
+        Fokus pada kesimpulan utama dari kombinasi indikator ini.
+        """
+
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        response = requests.post(api_url, json=payload)
+        response.raise_for_status()
+        
+        result = response.json()
+        ai_summary = result['candidates'][0]['content']['parts'][0]['text']
+
+        final_text = f"**🧠 Analisis Gemini AI untuk {pair} ({timeframe})**\n\n{ai_summary}"
+        context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=final_text, parse_mode=ParseMode.MARKDOWN)
+
+    except Exception as e:
+        print(f"Error di ai_analyze_command: {e}")
+        context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Terjadi kesalahan saat berkomunikasi dengan AI: {e}")
+
+# --- HANDLER WATCHLIST, STRATEGI & BERITA ---
+def news_command(update: Update, context: CallbackContext):
+    base_url = f"https://min-api.cryptocompare.com/data/v2/news/?lang=EN&api_key={CRYPTOCOMPARE_API_KEY}"
+    
+    if not context.args:
+        topic = "umum"
+        url = base_url
+    else:
+        symbol = context.args[0].upper()
+        topic = f"`{symbol}`"
+        url = f"{base_url}&categories={symbol}"
+
+    update.message.reply_text(f"📰 Mencari berita {topic}...", parse_mode=ParseMode.MARKDOWN)
+    
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        news_data = response.json()['Data'][:3]
+        
+        if not news_data:
+            update.message.reply_text(f"Tidak ada berita yang ditemukan untuk {topic}.", parse_mode=ParseMode.MARKDOWN)
+            return
+            
+        for news in news_data:
+            text = f"**{news['title']}**\n\n_{news['source_info']['name']} - {datetime.fromtimestamp(news['published_on']).strftime('%d %b %Y')}_\n[Baca Selengkapnya]({news['url']})"
+            update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+            
+    except Exception as e:
+        update.message.reply_text(f"Gagal mengambil berita: {e}")
 
 def add_command(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
@@ -364,6 +440,9 @@ def watchlist_command(update: Update, context: CallbackContext):
 def strategy_command(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     args = context.args
+    AVAILABLE_STRATEGIES = {
+        "pullback_buy": "Mencari sinyal beli saat terjadi koreksi dalam tren naik."
+    }
     
     if not args or args[0] not in ['list', 'toggle']:
         update.message.reply_text("Format salah. Gunakan `/strategy list` atau `/strategy toggle <nama>`.")
@@ -400,28 +479,6 @@ def strategy_command(update: Update, context: CallbackContext):
         new_status = "diaktifkan" if not current_status else "dinonaktifkan"
         update.message.reply_text(f"Strategi `{strategy_name}` berhasil {new_status}.", parse_mode=ParseMode.MARKDOWN)
 
-# --- HANDLER LAINNYA (News, Tombol) ---
-def news_command(update: Update, context: CallbackContext):
-    if not context.args:
-        update.message.reply_text("Format: `/news <simbol>`")
-        return
-    symbol = context.args[0]
-    update.message.reply_text(f"📰 Mencari berita untuk `{symbol}`...", parse_mode=ParseMode.MARKDOWN)
-    
-    try:
-        url = f"https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories={symbol.upper()}&api_key={CRYPTOCOMPARE_API_KEY}"
-        response = requests.get(url)
-        response.raise_for_status()
-        news_data = response.json()['Data'][:3] 
-        if not news_data:
-            update.message.reply_text(f"Tidak ada berita untuk `{symbol}`.", parse_mode=ParseMode.MARKDOWN)
-            return
-        for news in news_data:
-            text = f"**{news['title']}**\n\n_{news['source_info']['name']} - {datetime.fromtimestamp(news['published_on']).strftime('%d %b %Y')}_\n[Baca Selengkapnya]({news['url']})"
-            update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-    except Exception as e:
-        update.message.reply_text(f"Gagal mengambil berita: {e}")
-
 def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
@@ -430,7 +487,7 @@ def button_handler(update: Update, context: CallbackContext):
     
     if action == "refresh" or action == "chart":
         pair, timeframe = params.rsplit('_', 1)
-        filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
+        filename, caption, symbol, _ = generate_chart_and_caption(pair, timeframe)
         if filename:
             keyboard = [
                 [InlineKeyboardButton("Refresh 🔃", callback_data=f"refresh_{pair}_{timeframe}")],
@@ -439,7 +496,10 @@ def button_handler(update: Update, context: CallbackContext):
                     InlineKeyboardButton("4H", callback_data=f"chart_{pair}_4h"),
                     InlineKeyboardButton("1D", callback_data=f"chart_{pair}_1d"),
                 ],
-                [InlineKeyboardButton("Tambah ke Watchlist ❤️", callback_data=f"add_{symbol}")],
+                [
+                    InlineKeyboardButton("Tambah ke Watchlist ❤️", callback_data=f"add_{symbol}"),
+                    InlineKeyboardButton("Analisis AI 🧠", callback_data=f"ai_analyze_{pair}_{timeframe}")
+                ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             with open(filename, 'rb') as photo:
@@ -459,6 +519,25 @@ def button_handler(update: Update, context: CallbackContext):
         else:
             query.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist.", parse_mode=ParseMode.MARKDOWN)
 
+    elif action == "ai_analyze":
+        pair, timeframe = params.rsplit('_', 1)
+        class MockMessage:
+            def __init__(self, chat_id):
+                self.chat_id = chat_id
+                self.message_id = None
+            def reply_text(self, text, parse_mode):
+                msg = context.bot.send_message(chat_id=self.chat_id, text=text, parse_mode=parse_mode)
+                self.message_id = msg.message_id
+                return self
+        
+        class MockUpdate:
+            def __init__(self, chat_id):
+                self.message = MockMessage(chat_id)
+
+        mock_update = MockUpdate(query.message.chat_id)
+        context.args = [pair.split('/')[0], timeframe]
+        ai_analyze_command(mock_update, context)
+
 # --- FUNGSI UTAMA BOT ---
 def main_bot():
     if not TELEGRAM_TOKEN:
@@ -472,6 +551,7 @@ def main_bot():
     dispatcher.add_handler(CommandHandler("help", help_command))
     dispatcher.add_handler(CommandHandler("chart", chart_command))
     dispatcher.add_handler(CommandHandler("analyze", analyze_command))
+    dispatcher.add_handler(CommandHandler("ai_analyze", ai_analyze_command))
     dispatcher.add_handler(CommandHandler("news", news_command))
     dispatcher.add_handler(CommandHandler("add", add_command))
     dispatcher.add_handler(CommandHandler("remove", remove_command))
@@ -479,7 +559,7 @@ def main_bot():
     dispatcher.add_handler(CommandHandler("strategy", strategy_command))
     dispatcher.add_handler(CallbackQueryHandler(button_handler))
     
-    print("Bot Sinyal Kripto berhasil dijalankan...")
+    print("Bot Sinyal Kripto (AI Enhanced) berhasil dijalankan...")
     updater.start_polling()
     updater.idle()
 
