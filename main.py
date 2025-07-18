@@ -1,5 +1,5 @@
 # main.py
-# VERSI DENGAN INTEGRASI GEMINI AI & PEMBARUAN PERINTAH /NEWS
+# VERSI DENGAN PENGGABUNGAN ANALISIS AI KE PERINTAH UTAMA
 import os
 import requests
 import ccxt
@@ -59,6 +59,20 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
 # --- FUNGSI HELPER ---
+def get_gemini_analysis(prompt: str):
+    if not GEMINI_API_KEY:
+        return "Analisis AI tidak tersedia (API Key tidak dikonfigurasi)."
+    try:
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        response = requests.post(api_url, json=payload, timeout=45)
+        response.raise_for_status()
+        result = response.json()
+        return result['candidates'][0]['content']['parts'][0]['text']
+    except Exception as e:
+        print(f"Error saat berkomunikasi dengan Gemini: {e}")
+        return "Gagal mendapatkan analisis dari AI."
+
 def get_fear_and_greed_index():
     try:
         url = "https://api.alternative.me/fng/?limit=1"
@@ -81,13 +95,12 @@ def get_fear_and_greed_index():
         print(f"Error di get_fear_and_greed_index: {e}")
         return {"status": "error", "message": "Gagal memuat F&G Index."}
 
-
 def analyze_indicators(df: pd.DataFrame):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     analysis = {}
-    if last['close'] > last['ma9'] and last['ma9'] > last['ma26']: analysis['ma'] = "🟢 Bullish"
-    elif last['close'] < last['ma9'] and last['ma9'] < last['ma26']: analysis['ma'] = "🔴 Bearish"
+    if last['close'] > last['ma9'] and last['ma9'] > last['ma26']: analysis['ma'] = f"🟢 Bullish ({last['ma9']:.2f} > {last['ma26']:.2f})"
+    elif last['close'] < last['ma9'] and last['ma9'] < last['ma26']: analysis['ma'] = f"🔴 Bearish ({last['ma9']:.2f} < {last['ma26']:.2f})"
     else: analysis['ma'] = "⚪ Netral"
     if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought ({last['rsi']:.2f})"
     elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold ({last['rsi']:.2f})"
@@ -97,18 +110,18 @@ def analyze_indicators(df: pd.DataFrame):
     else: analysis['macd'] = "⚪ Netral"
     analysis['bb_score'] = 0
     if last['close'] < last['bb_low']:
-        analysis['bb'] = "🟢 Harga di bawah Lower Band"
+        analysis['bb'] = f"🟢 Di bawah Lower Band ({last['bb_low']:.2f})"
         analysis['bb_score'] = 1
     elif last['close'] > last['bb_high']:
-        analysis['bb'] = "🔴 Harga di atas Upper Band"
+        analysis['bb'] = f"🔴 Di atas Upper Band ({last['bb_high']:.2f})"
         analysis['bb_score'] = -1
     else:
-        analysis['bb'] = "⚪ Harga di dalam Bands"
+        analysis['bb'] = "⚪ Di dalam Bands"
     avg_volume = df['volume'].rolling(window=20).mean().iloc[-1]
     if last['volume'] > avg_volume * 1.75:
-        analysis['volume'] = "🔥 Tinggi (Konfirmasi Tren)"
+        analysis['volume'] = f"🔥 Tinggi ({last['volume']:,.0f})"
     else:
-        analysis['volume'] = "⚪ Normal"
+        analysis['volume'] = f"⚪ Normal ({last['volume']:,.0f})"
     return analysis
 
 def determine_final_signal(analysis: dict, sentiment: dict):
@@ -146,7 +159,7 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     df.dropna(inplace=True)
     
     if len(df) < 2:
-        return None, "Gagal menganalisis, data tidak cukup setelah diproses.", None, None
+        return None, "Gagal menganalisis, data tidak cukup setelah diproses.", None
 
     indicator_analysis = analyze_indicators(df)
     symbol = pair.split('/')[0]
@@ -160,6 +173,19 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     change_pct = ((last_price - first_price) / first_price) * 100
     change_emoji = "📈" if change_pct >= 0 else "📉"
     change_str = f"{change_emoji} {change_pct:+.2f}%"
+
+    # PEMBARUAN: Panggil AI untuk analisis naratif
+    prompt = f"""
+    Anda adalah seorang analis teknikal kripto profesional. Berikan ringkasan analisis pasar yang singkat dan padat (maksimal 3 kalimat) dalam bahasa Indonesia berdasarkan data berikut untuk {pair} timeframe {timeframe}.
+    Data Indikator:
+    - Moving Average: {indicator_analysis['ma']}
+    - RSI: {indicator_analysis['rsi']}
+    - MACD: {indicator_analysis['macd']}
+    - Bollinger Bands: {indicator_analysis['bb']}
+    - Volume: {indicator_analysis['volume']}
+    Fokus pada kesimpulan utama dari kombinasi indikator ini.
+    """
+    ai_summary = get_gemini_analysis(prompt)
 
     mc = mpf.make_marketcolors(up='#41a35a', down='#d74a43', wick={'up':'#41a35a','down':'#d74a43'}, volume={'up':'#41a35a','down':'#d74a43'})
     s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', gridstyle='-')
@@ -178,6 +204,7 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     filename = f'analysis_{pair.replace("/", "")}_{timeframe}.png'
     mpf.plot(df_for_plot, type='candle', style=s, title=f'Analisis {pair} - Timeframe {timeframe}', ylabel='Harga (USDT)', volume=True, mav=(9, 26), addplot=addplots, panel_ratios=(8, 3, 3), figscale=1.5, savefig=filename)
     
+    # PEMBARUAN: Bangun caption dengan format baru
     caption = (
         f"📊 **Analisis: {pair} | {timeframe} ({change_str})**\n"
         f"*(Harga: `${harga_terkini:,.2f}` pada {waktu_sekarang})*\n\n"
@@ -187,17 +214,18 @@ def generate_chart_and_caption(pair: str, timeframe: str):
         f"3. **MACD**: {indicator_analysis['macd']}\n"
         f"4. **Bollinger Bands**: {indicator_analysis['bb']}\n"
         f"5. **Volume**: {indicator_analysis['volume']}\n\n"
+        f"**🧠 Analisis AI:**\n_{ai_summary}_\n\n"
         f"**Sentimen Pasar**: {sentiment_analysis['text']}\n"
         f"------------------------------------\n"
         f"**{final_signal}**"
     )
-    return filename, caption, symbol, indicator_analysis
+    return filename, caption, symbol
 
 # --- HANDLER PERINTAH ---
 def start_command(update: Update, context: CallbackContext):
     text = (
         "👋 **Selamat Datang di Bot Sinyal Kripto v5 (AI Enhanced)!**\n\n"
-        "Bot ini sekarang ditenagai oleh Gemini AI untuk validasi sinyal dan analisis naratif.\n\n"
+        "Analisis AI sekarang terintegrasi langsung di setiap perintah `/chart` dan `/analyze`.\n\n"
         "Gunakan `/help` untuk melihat semua perintah."
     )
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
@@ -206,9 +234,8 @@ def help_command(update: Update, context: CallbackContext):
     text = (
         "**Perintah yang Tersedia:**\n\n"
         "**Analisis Manual:**\n"
-        "📈 `/chart <simbol> <tf>` - Analisis detail\n"
-        "🧠 `/ai_analyze <simbol> <tf>` - Analisis naratif oleh AI\n"
-        "🔭 `/analyze <simbol>` - Analisis multi-timeframe\n"
+        "📈 `/chart <simbol> <tf>` - Analisis detail dengan AI\n"
+        "🔭 `/analyze <simbol>` - Analisis multi-timeframe dengan AI\n"
         "📰 `/news [simbol]` - Berita umum atau spesifik\n\n"
         "**Watchlist (Wajib untuk Sinyal):**\n"
         "❤️ `/add <simbol>` - Tambah koin ke pantauan\n"
@@ -228,10 +255,10 @@ def chart_command(update: Update, context: CallbackContext):
     timeframe = context.args[1].lower()
     pair = f"{pair_input}/USDT" if '/' not in pair_input else pair_input
     
-    wait_message = update.message.reply_text(f"⏳ Memproses `{pair}`...", parse_mode=ParseMode.MARKDOWN)
+    wait_message = update.message.reply_text(f"⏳ Menganalisis `{pair}` dengan AI...", parse_mode=ParseMode.MARKDOWN)
     
     try:
-        filename, caption, symbol, _ = generate_chart_and_caption(pair, timeframe)
+        filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
         if not filename:
             context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Gagal: {caption}", parse_mode=ParseMode.MARKDOWN)
             return
@@ -243,10 +270,7 @@ def chart_command(update: Update, context: CallbackContext):
                 InlineKeyboardButton("4H", callback_data=f"chart_{pair}_4h"),
                 InlineKeyboardButton("1D", callback_data=f"chart_{pair}_1d"),
             ],
-            [
-                InlineKeyboardButton("Tambah ke Watchlist ❤️", callback_data=f"add_{symbol}"),
-                InlineKeyboardButton("Analisis AI 🧠", callback_data=f"ai_analyze_{pair}_{timeframe}")
-            ]
+            [InlineKeyboardButton("Tambah ke Watchlist ❤️", callback_data=f"add_{symbol}")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -267,12 +291,15 @@ def analyze_command(update: Update, context: CallbackContext):
     pair = f"{symbol}/USDT"
     timeframes = ['15m', '1h', '4h', '1d']
     
-    wait_message = update.message.reply_text(f"🔬 Menganalisis `{symbol}`...", parse_mode=ParseMode.MARKDOWN)
+    wait_message = update.message.reply_text(f"🔬 Menganalisis `{symbol}` dengan AI...", parse_mode=ParseMode.MARKDOWN)
     
     summary_text = f"**Analisis Multi-Timeframe untuk {symbol}**\n\n"
     exchange = ccxt.kucoin()
     has_buy, has_sell = False, False
     sentiment = get_fear_and_greed_index()
+    
+    # Kumpulkan data teknikal untuk AI
+    technical_data_for_ai = ""
 
     for tf in timeframes:
         try:
@@ -309,61 +336,23 @@ def analyze_command(update: Update, context: CallbackContext):
             if "JUAL" in signal: signal_emoji, has_sell = "🔴", True
 
             summary_text += f"`{tf}`: {signal_emoji} {analysis['ma']} {change_str}\n"
+            technical_data_for_ai += f"- Timeframe {tf}: Tren {analysis['ma']}, RSI {analysis['rsi']}, MACD {analysis['macd']}\n"
         except Exception:
             summary_text += f"`{tf}`: ❌ Gagal dimuat.\n"
     
+    # Panggil AI untuk kesimpulan akhir
+    prompt = f"""
+    Anda adalah seorang analis teknikal kripto profesional. Berikan kesimpulan pasar secara umum untuk {symbol} (maksimal 2 kalimat) berdasarkan ringkasan data multi-timeframe berikut:
+    {technical_data_for_ai}
+    """
+    ai_summary = get_gemini_analysis(prompt)
+
     final_verdict = "⚠️ **Kesimpulan: NETRAL / KONSOLIDASI**"
     if has_buy and not has_sell: final_verdict = "✅ **Kesimpulan: CENDERUNG BULLISH**"
     elif has_sell and not has_buy: final_verdict = "❌ **Kesimpulan: CENDERUNG BEARISH**"
 
-    summary_text += f"\n{final_verdict}\n\n*Sentimen Pasar Global: {sentiment['text']}*"
+    summary_text += f"\n{final_verdict}\n\n**🧠 Analisis AI:**\n_{ai_summary}_\n\n*Sentimen Pasar Global: {sentiment['text']}*"
     context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=summary_text, parse_mode=ParseMode.MARKDOWN)
-
-def ai_analyze_command(update: Update, context: CallbackContext):
-    if not context.args or len(context.args) != 2:
-        update.message.reply_text("Format: `/ai_analyze <simbol> <timeframe>`")
-        return
-    
-    pair_input = context.args[0].upper()
-    timeframe = context.args[1].lower()
-    pair = f"{pair_input}/USDT" if '/' not in pair_input else pair_input
-
-    wait_message = update.message.reply_text(f"🧠 Menganalisis `{pair}` dengan Gemini AI...", parse_mode=ParseMode.MARKDOWN)
-
-    try:
-        _, _, _, indicator_analysis = generate_chart_and_caption(pair, timeframe)
-
-        if not indicator_analysis:
-            context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text="Gagal mendapatkan data untuk analisis AI.")
-            return
-
-        prompt = f"""
-        Anda adalah seorang analis teknikal kripto profesional. Berikan ringkasan analisis pasar yang singkat dan padat (maksimal 3 kalimat) dalam bahasa Indonesia berdasarkan data berikut untuk {pair} timeframe {timeframe}.
-        
-        Data Indikator:
-        - Moving Average: {indicator_analysis['ma']}
-        - RSI: {indicator_analysis['rsi']}
-        - MACD: {indicator_analysis['macd']}
-        - Bollinger Bands: {indicator_analysis['bb']}
-        - Volume: {indicator_analysis['volume']}
-        
-        Fokus pada kesimpulan utama dari kombinasi indikator ini.
-        """
-
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
-        response = requests.post(api_url, json=payload)
-        response.raise_for_status()
-        
-        result = response.json()
-        ai_summary = result['candidates'][0]['content']['parts'][0]['text']
-
-        final_text = f"**🧠 Analisis Gemini AI untuk {pair} ({timeframe})**\n\n{ai_summary}"
-        context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=final_text, parse_mode=ParseMode.MARKDOWN)
-
-    except Exception as e:
-        print(f"Error di ai_analyze_command: {e}")
-        context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Terjadi kesalahan saat berkomunikasi dengan AI: {e}")
 
 # --- HANDLER WATCHLIST, STRATEGI & BERITA ---
 def news_command(update: Update, context: CallbackContext):
@@ -487,7 +476,7 @@ def button_handler(update: Update, context: CallbackContext):
     
     if action == "refresh" or action == "chart":
         pair, timeframe = params.rsplit('_', 1)
-        filename, caption, symbol, _ = generate_chart_and_caption(pair, timeframe)
+        filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
         if filename:
             keyboard = [
                 [InlineKeyboardButton("Refresh 🔃", callback_data=f"refresh_{pair}_{timeframe}")],
@@ -496,10 +485,7 @@ def button_handler(update: Update, context: CallbackContext):
                     InlineKeyboardButton("4H", callback_data=f"chart_{pair}_4h"),
                     InlineKeyboardButton("1D", callback_data=f"chart_{pair}_1d"),
                 ],
-                [
-                    InlineKeyboardButton("Tambah ke Watchlist ❤️", callback_data=f"add_{symbol}"),
-                    InlineKeyboardButton("Analisis AI 🧠", callback_data=f"ai_analyze_{pair}_{timeframe}")
-                ]
+                [InlineKeyboardButton("Tambah ke Watchlist ❤️", callback_data=f"add_{symbol}")],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             with open(filename, 'rb') as photo:
@@ -519,25 +505,6 @@ def button_handler(update: Update, context: CallbackContext):
         else:
             query.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist.", parse_mode=ParseMode.MARKDOWN)
 
-    elif action == "ai_analyze":
-        pair, timeframe = params.rsplit('_', 1)
-        class MockMessage:
-            def __init__(self, chat_id):
-                self.chat_id = chat_id
-                self.message_id = None
-            def reply_text(self, text, parse_mode):
-                msg = context.bot.send_message(chat_id=self.chat_id, text=text, parse_mode=parse_mode)
-                self.message_id = msg.message_id
-                return self
-        
-        class MockUpdate:
-            def __init__(self, chat_id):
-                self.message = MockMessage(chat_id)
-
-        mock_update = MockUpdate(query.message.chat_id)
-        context.args = [pair.split('/')[0], timeframe]
-        ai_analyze_command(mock_update, context)
-
 # --- FUNGSI UTAMA BOT ---
 def main_bot():
     if not TELEGRAM_TOKEN:
@@ -551,7 +518,6 @@ def main_bot():
     dispatcher.add_handler(CommandHandler("help", help_command))
     dispatcher.add_handler(CommandHandler("chart", chart_command))
     dispatcher.add_handler(CommandHandler("analyze", analyze_command))
-    dispatcher.add_handler(CommandHandler("ai_analyze", ai_analyze_command))
     dispatcher.add_handler(CommandHandler("news", news_command))
     dispatcher.add_handler(CommandHandler("add", add_command))
     dispatcher.add_handler(CommandHandler("remove", remove_command))
