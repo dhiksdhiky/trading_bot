@@ -1,5 +1,5 @@
 # main.py
-# VERSI DIRAMPINGKAN DENGAN PERINTAH /CHART YANG LEBIH SEDERHANA
+# VERSI DENGAN DETAIL INDIKATOR, HARGA IDR, DAN TOMBOL INFO
 import os
 import requests
 import ccxt
@@ -94,7 +94,7 @@ def get_fear_and_greed_index():
         print(f"Error di get_fear_and_greed_index: {e}")
         return {"status": "error", "message": "Gagal memuat F&G Index."}
 
-def analyze_indicators(df: pd.DataFrame):
+def analyze_indicators(df: pd.DataFrame, symbol: str):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     analysis = {}
@@ -104,23 +104,23 @@ def analyze_indicators(df: pd.DataFrame):
     if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought ({last['rsi']:.2f})"
     elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold ({last['rsi']:.2f})"
     else: analysis['rsi'] = f"⚪ Netral ({last['rsi']:.2f})"
-    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']: analysis['macd'] = "🟢 Golden Cross"
-    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']: analysis['macd'] = "🔴 Death Cross"
+    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']: analysis['macd'] = f"🟢 Golden Cross (MACD: {last['macd']:.2f}, Signal: {last['macd_signal']:.2f})"
+    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']: analysis['macd'] = f"🔴 Death Cross (MACD: {last['macd']:.2f}, Signal: {last['macd_signal']:.2f})"
     else: analysis['macd'] = "⚪ Netral"
     analysis['bb_score'] = 0
     if last['close'] < last['bb_low']:
-        analysis['bb'] = f"🟢 Di bawah Lower Band ({last['bb_low']:.2f})"
+        analysis['bb'] = f"🟢 Di bawah Lower Band (Harga: {last['close']:.2f} < {last['bb_low']:.2f})"
         analysis['bb_score'] = 1
     elif last['close'] > last['bb_high']:
-        analysis['bb'] = f"🔴 Di atas Upper Band ({last['bb_high']:.2f})"
+        analysis['bb'] = f"🔴 Di atas Upper Band (Harga: {last['close']:.2f} > {last['bb_high']:.2f})"
         analysis['bb_score'] = -1
     else:
         analysis['bb'] = "⚪ Di dalam Bands"
     avg_volume = df['volume'].rolling(window=20).mean().iloc[-1]
     if last['volume'] > avg_volume * 1.75:
-        analysis['volume'] = f"🔥 Tinggi ({last['volume']:,.0f})"
+        analysis['volume'] = f"🔥 Tinggi ({last['volume']:,.0f} {symbol})"
     else:
-        analysis['volume'] = f"⚪ Normal ({last['volume']:,.0f})"
+        analysis['volume'] = f"⚪ Normal ({last['volume']:,.0f} {symbol})"
     return analysis
 
 def determine_final_signal(analysis: dict, sentiment: dict):
@@ -160,8 +160,8 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     if len(df) < 2:
         return None, "Gagal menganalisis, data tidak cukup setelah diproses.", None
 
-    indicator_analysis = analyze_indicators(df)
     symbol = pair.split('/')[0]
+    indicator_analysis = analyze_indicators(df, symbol)
     sentiment_analysis = get_fear_and_greed_index()
     final_signal = determine_final_signal(indicator_analysis, sentiment_analysis)
     
@@ -197,14 +197,23 @@ def generate_chart_and_caption(pair: str, timeframe: str):
         mpf.make_addplot(df_for_plot['macd_hist'].where(df_for_plot['macd_hist'] < 0, 0), type='bar', panel=2, color='#d74a43')
     ]
     
-    harga_terkini = df['close'].iloc[-1]
+    harga_terkini_usd = df['close'].iloc[-1]
+    harga_terkini_idr_str = "N/A"
+    try:
+        exchange_idr = ccxt.indodax()
+        ticker_idr = exchange_idr.fetch_ticker('USDT/IDR')
+        harga_terkini_idr = harga_terkini_usd * ticker_idr['last']
+        harga_terkini_idr_str = f"Rp {harga_terkini_idr:,.0f}"
+    except Exception as e:
+        print(f"Gagal mengambil harga IDR: {e}")
+
     waktu_sekarang = datetime.now(pytz.timezone('Asia/Jakarta')).strftime('%d %b %Y, %H:%M WIB')
     filename = f'analysis_{pair.replace("/", "")}_{timeframe}.png'
     mpf.plot(df_for_plot, type='candle', style=s, title=f'Analisis {pair} - Timeframe {timeframe}', ylabel='Harga (USDT)', volume=True, mav=(9, 26), addplot=addplots, panel_ratios=(8, 3, 3), figscale=1.5, savefig=filename)
     
     caption = (
         f"📊 **Analisis: {pair} | {timeframe} ({change_str})**\n"
-        f"*(Harga: `${harga_terkini:,.2f}` pada {waktu_sekarang})*\n\n"
+        f"*(Harga: **{harga_terkini_idr_str}** | **${harga_terkini_usd:,.2f}** pada {waktu_sekarang})*\n\n"
         f"**Indikator Teknikal:**\n"
         f"1. **Moving Average**: {indicator_analysis['ma']}\n"
         f"2. **RSI**: {indicator_analysis['rsi']}\n"
@@ -221,8 +230,8 @@ def generate_chart_and_caption(pair: str, timeframe: str):
 # --- HANDLER PERINTAH ---
 def start_command(update: Update, context: CallbackContext):
     text = (
-        "👋 **Selamat Datang di Bot Sinyal Kripto v5 (AI Enhanced)!**\n\n"
-        "Bot ini ditenagai oleh Gemini AI untuk analisis chart dan sinyal proaktif.\n\n"
+        "👋 **Selamat Datang di Bot Sinyal Kripto v6!**\n\n"
+        "Analisis chart sekarang lebih detail dan informatif. Gunakan `/info` untuk belajar tentang indikator.\n\n"
         "Gunakan `/help` untuk melihat semua perintah."
     )
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
@@ -230,7 +239,8 @@ def start_command(update: Update, context: CallbackContext):
 def help_command(update: Update, context: CallbackContext):
     text = (
         "**Perintah yang Tersedia:**\n\n"
-        "📈 `/chart <simbol>` - Analisis detail (default 4 jam)\n\n"
+        "📈 `/chart <simbol>` - Analisis detail (default 4 jam)\n"
+        "ℹ️ `/info` - Penjelasan singkat tentang indikator\n\n"
         "**Watchlist (Wajib untuk Sinyal):**\n"
         "❤️ `/add <simbol>` - Tambah koin ke pantauan\n"
         "💔 `/remove <simbol>` - Hapus koin\n"
@@ -239,16 +249,38 @@ def help_command(update: Update, context: CallbackContext):
         "🎯 `/strategy list` - Lihat strategi tersedia\n"
         "✅ `/strategy toggle <nama>` - Aktifkan/nonaktifkan strategi"
     )
-    update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    if update.callback_query:
+        update.callback_query.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    else:
+        update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+def info_command(update: Update, context: CallbackContext):
+    text = (
+        "**ℹ️ Penjelasan Singkat Indikator Teknikal**\n\n"
+        "1. **Moving Average (MA)**\n"
+        "Menunjukkan arah tren harga rata-rata. Jika MA cepat di atas MA lambat, tren cenderung naik (Bullish), dan sebaliknya.\n\n"
+        "2. **Relative Strength Index (RSI)**\n"
+        "Mengukur kecepatan perubahan harga (momentum). Nilai di atas 70 menandakan jenuh beli (Overbought), di bawah 30 menandakan jenuh jual (Oversold).\n\n"
+        "3. **MACD**\n"
+        "Menunjukkan hubungan antara dua MA untuk mengukur momentum. 'Golden Cross' adalah sinyal beli kuat, 'Death Cross' adalah sinyal jual kuat.\n\n"
+        "4. **Bollinger Bands (BB)**\n"
+        "Mengukur volatilitas pasar. Harga yang keluar dari 'bands' (pita) menandakan pergerakan harga yang signifikan.\n\n"
+        "5. **Volume**\n"
+        "Menunjukkan jumlah koin yang diperdagangkan. Volume yang tinggi saat harga bergerak mengkonfirmasi kekuatan tren tersebut."
+    )
+    # Cek apakah ini dari tombol atau perintah
+    if update.callback_query:
+        update.callback_query.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    else:
+        update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 def chart_command(update: Update, context: CallbackContext):
-    # PEMBARUAN: Perintah sekarang hanya butuh 1 argumen
     if len(context.args) != 1:
         update.message.reply_text("Format salah. Gunakan: `/chart <simbol>`")
         return
     
     pair_input = context.args[0].upper()
-    timeframe = '4h' # PEMBARUAN: Default timeframe diatur ke 4 jam
+    timeframe = '4h'
     pair = f"{pair_input}/USDT" if '/' not in pair_input else pair_input
     
     wait_message = update.message.reply_text(f"⏳ Menganalisis `{pair}` dengan AI...", parse_mode=ParseMode.MARKDOWN)
@@ -259,8 +291,12 @@ def chart_command(update: Update, context: CallbackContext):
             context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Gagal: {caption}", parse_mode=ParseMode.MARKDOWN)
             return
 
+        # PEMBARUAN: Ganti tombol Bantuan menjadi Info Indikator
         keyboard = [
-            [InlineKeyboardButton("Refresh 🔃", callback_data=f"refresh_{pair}_{timeframe}")],
+            [
+                InlineKeyboardButton("Refresh 🔃", callback_data=f"refresh_{pair}_{timeframe}"),
+                InlineKeyboardButton("Info Indikator ℹ️", callback_data="show_info")
+            ],
             [
                 InlineKeyboardButton("1H", callback_data=f"chart_{pair}_1h"),
                 InlineKeyboardButton("4H", callback_data=f"chart_{pair}_4h"),
@@ -369,17 +405,25 @@ def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     data = query.data
+    
+    # PEMBARUAN: Tangani callback untuk tombol Info
+    if data == "show_info":
+        info_command(update, context)
+        return
+
     action, params = data.split('_', 1)
     
     if action == "refresh" or action == "chart":
         pair, timeframe = params.rsplit('_', 1)
-        # Kirim pesan tunggu sementara karena ini bisa memakan waktu
         query.edit_message_caption(caption=f"⏳ Memuat ulang {pair} timeframe {timeframe}...")
         
         filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
         if filename:
             keyboard = [
-                [InlineKeyboardButton("Refresh 🔃", callback_data=f"refresh_{pair}_{timeframe}")],
+                [
+                    InlineKeyboardButton("Refresh 🔃", callback_data=f"refresh_{pair}_{timeframe}"),
+                    InlineKeyboardButton("Info Indikator ℹ️", callback_data="show_info")
+                ],
                 [
                     InlineKeyboardButton("1H", callback_data=f"chart_{pair}_1h"),
                     InlineKeyboardButton("4H", callback_data=f"chart_{pair}_4h"),
@@ -416,6 +460,7 @@ def main_bot():
     
     dispatcher.add_handler(CommandHandler("start", start_command))
     dispatcher.add_handler(CommandHandler("help", help_command))
+    dispatcher.add_handler(CommandHandler("info", info_command))
     dispatcher.add_handler(CommandHandler("chart", chart_command))
     dispatcher.add_handler(CommandHandler("add", add_command))
     dispatcher.add_handler(CommandHandler("remove", remove_command))
