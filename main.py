@@ -1,5 +1,5 @@
 # main.py
-# VERSI DIRAMPINGKAN UNTUK PERSIAPAN FITUR MASA DEPAN
+# VERSI DIRAMPINGKAN DENGAN PERINTAH /CHART YANG LEBIH SEDERHANA
 import os
 import requests
 import ccxt
@@ -230,7 +230,7 @@ def start_command(update: Update, context: CallbackContext):
 def help_command(update: Update, context: CallbackContext):
     text = (
         "**Perintah yang Tersedia:**\n\n"
-        "📈 `/chart <simbol> <tf>` - Analisis detail dengan AI\n\n"
+        "📈 `/chart <simbol>` - Analisis detail (default 4 jam)\n\n"
         "**Watchlist (Wajib untuk Sinyal):**\n"
         "❤️ `/add <simbol>` - Tambah koin ke pantauan\n"
         "💔 `/remove <simbol>` - Hapus koin\n"
@@ -242,11 +242,13 @@ def help_command(update: Update, context: CallbackContext):
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 def chart_command(update: Update, context: CallbackContext):
-    if len(context.args) != 2:
-        update.message.reply_text("Format: `/chart <simbol> <timeframe>`")
+    # PEMBARUAN: Perintah sekarang hanya butuh 1 argumen
+    if len(context.args) != 1:
+        update.message.reply_text("Format salah. Gunakan: `/chart <simbol>`")
         return
+    
     pair_input = context.args[0].upper()
-    timeframe = context.args[1].lower()
+    timeframe = '4h' # PEMBARUAN: Default timeframe diatur ke 4 jam
     pair = f"{pair_input}/USDT" if '/' not in pair_input else pair_input
     
     wait_message = update.message.reply_text(f"⏳ Menganalisis `{pair}` dengan AI...", parse_mode=ParseMode.MARKDOWN)
@@ -371,6 +373,9 @@ def button_handler(update: Update, context: CallbackContext):
     
     if action == "refresh" or action == "chart":
         pair, timeframe = params.rsplit('_', 1)
+        # Kirim pesan tunggu sementara karena ini bisa memakan waktu
+        query.edit_message_caption(caption=f"⏳ Memuat ulang {pair} timeframe {timeframe}...")
+        
         filename, caption, symbol = generate_chart_and_caption(pair, timeframe)
         if filename:
             keyboard = [
