@@ -1,5 +1,5 @@
 # signal_finder.py
-# Mesin pemindai sinyal proaktif dengan strategi ganda & validasi Gemini AI
+# Mesin pemindai sinyal hibrida (Sinyal Kualitas Tinggi + Peringatan Dini)
 import os
 import requests
 import ccxt
@@ -15,57 +15,47 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
-# --- DATABASE PENGATURAN OPTIMAL (Berdasarkan Riset Anda) ---
+# --- DATABASE PENGATURAN INDIKATOR ---
 OPTIMAL_SETTINGS = {
     "BTC":  {"ema_fast": 20, "ema_slow": 50, "rsi_period": 14, "rsi_ob": 80, "rsi_os": 20, "macd_fast": 12, "macd_slow": 26, "macd_signal": 9},
     "ETH":  {"ema_fast": 20, "ema_slow": 50, "rsi_period": 14, "rsi_ob": 80, "rsi_os": 20, "macd_fast": 12, "macd_slow": 26, "macd_signal": 9},
     "SOL":  {"ema_fast": 9,  "ema_slow": 21, "rsi_period": 14, "rsi_ob": 80, "rsi_os": 20, "macd_fast": 5,  "macd_slow": 35, "macd_signal": 5},
-    "BNB":  {"ema_fast": 9,  "ema_slow": 21, "rsi_period": 14, "rsi_ob": 75, "rsi_os": 25, "macd_fast": 12, "macd_slow": 26, "macd_signal": 9},
-    "DOGE": {"ema_fast": 9,  "ema_slow": 21, "rsi_period": 14, "rsi_ob": 80, "rsi_os": 20, "macd_fast": 5,  "macd_slow": 35, "macd_signal": 5},
-    "AVAX": {"ema_fast": 9,  "ema_slow": 21, "rsi_period": 14, "rsi_ob": 80, "rsi_os": 20, "macd_fast": 5,  "macd_slow": 35, "macd_signal": 5},
-    "XRP":  {"ema_fast": 20, "ema_slow": 50, "rsi_period": 14, "rsi_ob": 70, "rsi_os": 30, "macd_fast": 12, "macd_slow": 26, "macd_signal": 9},
-    "ADA":  {"ema_fast": 20, "ema_slow": 50, "rsi_period": 21, "rsi_ob": 70, "rsi_os": 30, "macd_fast": 12, "macd_slow": 26, "macd_signal": 9},
-    "DOT":  {"ema_fast": 20, "ema_slow": 50, "rsi_period": 14, "rsi_ob": 75, "rsi_os": 25, "macd_fast": 12, "macd_slow": 26, "macd_signal": 9},
-    "LINK": {"ema_fast": 20, "ema_slow": 50, "rsi_period": 14, "rsi_ob": 75, "rsi_os": 25, "macd_fast": 12, "macd_slow": 26, "macd_signal": 9},
     "DEFAULT": {"ema_fast": 20, "ema_slow": 50, "rsi_period": 14, "rsi_ob": 70, "rsi_os": 30, "macd_fast": 12, "macd_slow": 26, "macd_signal": 9}
 }
+SENSITIVE_SETTINGS = {
+    "BTC":  {"rsi_ob": 65, "rsi_os": 35, "macd_fast": 9, "macd_slow": 21, "macd_signal": 7},
+    "ETH":  {"rsi_ob": 65, "rsi_os": 35, "macd_fast": 9, "macd_slow": 21, "macd_signal": 7},
+    "SOL":  {"rsi_ob": 65, "rsi_os": 35, "macd_fast": 9, "macd_slow": 21, "macd_signal": 7},
+    "DEFAULT": {"rsi_ob": 65, "rsi_os": 35, "macd_fast": 9, "macd_slow": 21, "macd_signal": 7}
+}
 
-# --- FUNGSI INTERAKSI DENGAN GEMINI AI ---
+# --- FUNGSI INTERAKSI DENGAN AI & API ---
 def get_gemini_analysis(prompt: str):
-    if not GEMINI_API_KEY:
-        print("Warning: GEMINI_API_KEY tidak diset. Melewatkan analisis AI.")
-        return None
+    if not GEMINI_API_KEY: return None
     try:
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         response = requests.post(api_url, json=payload, timeout=45)
         response.raise_for_status()
-        result = response.json()
-        return result['candidates'][0]['content']['parts'][0]['text']
+        return response.json()['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
         print(f"Error saat berkomunikasi dengan Gemini: {e}")
         return None
 
 def get_news_headlines(symbol: str):
-    base_url = f"https://min-api.cryptocompare.com/data/v2/news/?lang=EN&api_key={CRYPTOCOMPARE_API_KEY}"
-    url = f"{base_url}&categories={symbol.upper()}"
+    url = f"https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories={symbol.upper()}&api_key={CRYPTOCOMPARE_API_KEY}"
     try:
         response = requests.get(url)
         response.raise_for_status()
-        news_data = response.json()['Data'][:5]
-        headlines = [news['title'] for news in news_data]
-        return headlines
+        return [news['title'] for news in response.json()['Data'][:5]]
     except Exception as e:
         print(f"Gagal mengambil berita untuk AI: {e}")
         return []
 
-# --- FUNGSI LAINNYA ---
-def get_user_data_from_api():
+def get_api_data():
     try:
         base_url = RAILWAY_URL
-        if not base_url.startswith(('http://', 'https://')):
-            base_url = 'https://' + base_url
-            
+        if not base_url.startswith(('http://', 'https://')): base_url = 'https://' + base_url
         url = f"{base_url}/api/data?secret={API_SECRET_KEY}"
         response = requests.get(url, timeout=20)
         response.raise_for_status()
@@ -74,201 +64,147 @@ def get_user_data_from_api():
         print(f"Gagal mengambil data dari Railway: {e}")
         return None
 
-def calculate_indicators(df, settings):
-    df['ema_fast'] = ta.trend.ema_indicator(df['close'], window=settings['ema_fast'])
-    df['ema_slow'] = ta.trend.ema_indicator(df['close'], window=settings['ema_slow'])
-    df['rsi'] = ta.momentum.rsi(df['close'], window=settings['rsi_period'])
-    macd = ta.trend.MACD(df['close'], window_fast=settings['macd_fast'], window_slow=settings['macd_slow'], window_sign=settings['macd_signal'])
+def calculate_indicators(df, settings, sensitive=False):
+    if sensitive:
+        df['rsi'] = ta.momentum.rsi(df['close'], window=14)
+        macd = ta.trend.MACD(df['close'], window_fast=settings['macd_fast'], window_slow=settings['macd_slow'], window_sign=settings['macd_signal'])
+    else:
+        df['ema_fast'] = ta.trend.ema_indicator(df['close'], window=settings['ema_fast'])
+        df['ema_slow'] = ta.trend.ema_indicator(df['close'], window=settings['ema_slow'])
+        df['rsi'] = ta.momentum.rsi(df['close'], window=settings['rsi_period'])
+        macd = ta.trend.MACD(df['close'], window_fast=settings['macd_fast'], window_slow=settings['macd_slow'], window_sign=settings['macd_signal'])
+    
     df['macd'] = macd.macd()
     df['macd_signal'] = macd.macd_signal()
     df.dropna(inplace=True)
     return df
 
 # --- FUNGSI STRATEGI ---
-def check_pullback_buy_strategy(symbol: str, timeframe: str = '4h'):
+def check_signal(symbol: str, timeframe: str = '4h'):
     try:
         settings = OPTIMAL_SETTINGS.get(symbol, OPTIMAL_SETTINGS["DEFAULT"])
         exchange = ccxt.kucoin()
         ohlcv = exchange.fetch_ohlcv(f"{symbol}/USDT", timeframe, limit=100)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df = calculate_indicators(df, settings)
-        
-        if len(df) < 3: return None
+        if len(df) < 3: return None, None
 
         last, prev = df.iloc[-1], df.iloc[-2]
 
         is_uptrend = last['close'] > last['ema_slow'] and last['ema_fast'] > last['ema_slow']
         rsi_pullback = prev['rsi'] < settings['rsi_os'] and last['rsi'] > settings['rsi_os']
-        macd_confirmation = prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']
+        macd_buy_confirm = prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']
 
-        if is_uptrend and rsi_pullback and macd_confirmation:
-            print(f"Sinyal teknikal Beli ditemukan untuk {symbol}. Memvalidasi dengan AI...")
-            
-            news_headlines = get_news_headlines(symbol)
-            news_context = "Tidak ada berita signifikan."
-            if news_headlines:
-                news_context = "Berita terbaru yang relevan:\n- " + "\n- ".join(news_headlines)
+        if is_uptrend and rsi_pullback and macd_buy_confirm:
+            return "BUY", df
 
-            prompt_sentiment = f"Saya menemukan sinyal beli teknikal yang kuat untuk {symbol}. {news_context}. Berdasarkan kombinasi data teknikal dan berita ini, apakah sentimen pasar secara keseluruhan mendukung untuk membuka posisi beli? Jawab 'YA' jika mendukung, atau 'TIDAK' jika berita negatif ini membuat sinyal teknikal menjadi terlalu berisiko."
-            sentiment_validation = get_gemini_analysis(prompt_sentiment)
-            
-            if sentiment_validation and "TIDAK" in sentiment_validation.upper():
-                print(f"AI mendeteksi sentimen negatif untuk {symbol}. Sinyal dibatalkan.")
-                return None
-            
-            print(f"Validasi sentimen AI untuk {symbol} berhasil.")
-            
-            harga_saat_ini = last['close']
-            swing_low = df['low'].tail(14).min()
-            swing_high = df['high'].tail(14).max()
+        is_downtrend = last['close'] < last['ema_slow'] and last['ema_fast'] < last['ema_slow']
+        rsi_rally_fail = prev['rsi'] > settings['rsi_ob'] and last['rsi'] < settings['rsi_ob']
+        macd_sell_confirm = prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']
 
-            prompt_risk = f"""
-            Sinyal beli untuk {symbol} ditemukan di harga ${harga_saat_ini:,.2f}. Swing low terdekat adalah ${swing_low:,.2f} dan swing high terdekat adalah ${swing_high:,.2f}.
-            Berdasarkan data ini, sarankan level Stop-Loss dan Take-Profit (Target 1) yang logis.
-            Jawab HANYA dalam format JSON seperti ini: {{"stop_loss": "harga", "take_profit_1": "harga"}}
-            """
-            risk_suggestion_str = get_gemini_analysis(prompt_risk)
-            risk_suggestion = {}
-            if risk_suggestion_str:
-                try:
-                    clean_json_str = risk_suggestion_str.replace('```json', '').replace('```', '').strip()
-                    risk_suggestion = json.loads(clean_json_str)
-                except json.JSONDecodeError:
-                    print("Gagal mem-parsing saran risiko dari AI.")
+        if is_downtrend and rsi_rally_fail and macd_sell_confirm:
+            return "SELL", df
 
-            sl = risk_suggestion.get('stop_loss', 'N/A')
-            tp1 = risk_suggestion.get('take_profit_1', 'N/A')
-
-            message = (
-                f"🎯 **SINYAL DIVALIDASI AI: Potensi Beli**\n\n"
-                f"📈 **Aset**: `{symbol}` (Timeframe: {timeframe})\n"
-                f"💰 **Harga Saat Ini**: `${harga_saat_ini:,.2f}`\n\n"
-                f"**Analisis Teknikal:**\n"
-                f"1. **Tren Utama**: Bullish\n"
-                f"2. **Pullback**: RSI keluar dari area oversold\n"
-                f"3. **Konfirmasi**: MACD Golden Cross\n\n"
-                f"**🧠 Saran Manajemen Risiko dari AI:**\n"
-                f"🔴 **Stop-Loss**: `${sl}`\n"
-                f"🟢 **Take-Profit 1**: `${tp1}`\n\n"
-                f"_(Selalu lakukan riset Anda sendiri)_"
-            )
-            return message
-        return None
+        return None, None
     except Exception as e:
-        print(f"Error saat mengecek strategi beli untuk {symbol}: {e}")
-        return None
+        print(f"Error saat mengecek Sinyal untuk {symbol}: {e}")
+        return None, None
 
-def check_breakdown_sell_strategy(symbol: str, timeframe: str = '4h'):
+def check_alert(symbol: str, timeframe: str = '4h'):
     try:
-        settings = OPTIMAL_SETTINGS.get(symbol, OPTIMAL_SETTINGS["DEFAULT"])
+        settings = SENSITIVE_SETTINGS.get(symbol, SENSITIVE_SETTINGS["DEFAULT"])
         exchange = ccxt.kucoin()
         ohlcv = exchange.fetch_ohlcv(f"{symbol}/USDT", timeframe, limit=100)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df = calculate_indicators(df, settings)
-
+        df = calculate_indicators(df, settings, sensitive=True)
         if len(df) < 3: return None
 
         last, prev = df.iloc[-1], df.iloc[-2]
 
-        is_downtrend = last['close'] < last['ema_slow'] and last['ema_fast'] < last['ema_slow']
-        rsi_rally_fail = prev['rsi'] > settings['rsi_ob'] and last['rsi'] < settings['rsi_ob']
-        macd_confirmation = prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']
+        rsi_buy_alert = last['rsi'] < settings['rsi_os']
+        macd_buy_alert = prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']
+        if rsi_buy_alert and macd_buy_alert:
+            return "BUY_ALERT"
 
-        if is_downtrend and rsi_rally_fail and macd_confirmation:
-            print(f"Sinyal teknikal Jual ditemukan untuk {symbol}. Memvalidasi dengan AI...")
-
-            news_headlines = get_news_headlines(symbol)
-            news_context = "Tidak ada berita signifikan."
-            if news_headlines:
-                news_context = "Berita terbaru yang relevan:\n- " + "\n- ".join(news_headlines)
-
-            prompt_sentiment = f"Saya menemukan sinyal jual (short) teknikal yang kuat untuk {symbol}. {news_context}. Berdasarkan kombinasi data teknikal dan berita ini, apakah sentimen pasar secara keseluruhan mendukung untuk membuka posisi jual? Jawab 'YA' jika mendukung, atau 'TIDAK' jika berita positif ini membuat sinyal teknikal menjadi terlalu berisiko."
-            sentiment_validation = get_gemini_analysis(prompt_sentiment)
+        rsi_sell_alert = last['rsi'] > settings['rsi_ob']
+        macd_sell_alert = prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']
+        if rsi_sell_alert and macd_sell_alert:
+            return "SELL_ALERT"
             
-            if sentiment_validation and "TIDAK" in sentiment_validation.upper():
-                print(f"AI mendeteksi sentimen positif untuk {symbol}. Sinyal jual dibatalkan.")
-                return None
-            
-            print(f"Validasi sentimen AI untuk {symbol} berhasil.")
-
-            harga_saat_ini = last['close']
-            swing_low = df['low'].tail(14).min()
-            swing_high = df['high'].tail(14).max()
-
-            prompt_risk = f"""
-            Sinyal jual untuk {symbol} ditemukan di harga ${harga_saat_ini:,.2f}. Swing low terdekat adalah ${swing_low:,.2f} dan swing high terdekat adalah ${swing_high:,.2f}.
-            Berdasarkan data ini, sarankan level Stop-Loss dan Take-Profit (Target 1) yang logis untuk posisi jual (short).
-            Jawab HANYA dalam format JSON seperti ini: {{"stop_loss": "harga", "take_profit_1": "harga"}}
-            """
-            risk_suggestion_str = get_gemini_analysis(prompt_risk)
-            risk_suggestion = {}
-            if risk_suggestion_str:
-                try:
-                    clean_json_str = risk_suggestion_str.replace('```json', '').replace('```', '').strip()
-                    risk_suggestion = json.loads(clean_json_str)
-                except json.JSONDecodeError:
-                    print("Gagal mem-parsing saran risiko dari AI.")
-
-            sl = risk_suggestion.get('stop_loss', 'N/A')
-            tp1 = risk_suggestion.get('take_profit_1', 'N/A')
-
-            message = (
-                f"🎯 **SINYAL DIVALIDASI AI: Potensi Jual (Short)**\n\n"
-                f"📉 **Aset**: `{symbol}` (Timeframe: {timeframe})\n"
-                f"💰 **Harga Saat Ini**: `${harga_saat_ini:,.2f}`\n\n"
-                f"**Analisis Teknikal:**\n"
-                f"1. **Tren Utama**: Bearish\n"
-                f"2. **Reli Gagal**: RSI keluar dari area overbought\n"
-                f"3. **Konfirmasi**: MACD Death Cross\n\n"
-                f"**🧠 Saran Manajemen Risiko dari AI:**\n"
-                f"🔴 **Stop-Loss**: `${sl}`\n"
-                f"🟢 **Take-Profit 1**: `${tp1}`\n\n"
-                f"_(Selalu lakukan riset Anda sendiri)_"
-            )
-            return message
         return None
     except Exception as e:
-        print(f"Error saat mengecek strategi jual untuk {symbol}: {e}")
+        print(f"Error saat mengecek Peringatan untuk {symbol}: {e}")
         return None
 
 # --- FUNGSI MAIN ---
 def main():
-    print("Memulai pemindai sinyal (AI Enhanced)...")
+    print("Memulai pemindai sinyal hibrida...")
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    user_data = get_user_data_from_api()
+    api_data = get_api_data()
     
-    if not user_data:
-        print("Gagal memuat data pengguna. Keluar.")
+    if not api_data:
+        print("Gagal memuat data. Keluar.")
         return
 
-    for user_id, data in user_data.items():
-        strategies = data.get("strategies", {})
-        watchlist = data.get("watchlist", [])
-        
-        if not watchlist: continue
-        
-        print(f"Memindai untuk pengguna {user_id}...")
+    user_data = api_data.get("users", {})
+    core_watchlist = api_data.get("core_watchlist", [])
 
-        if strategies.get("pullback_buy", {}).get("enabled", False):
-            for coin in watchlist:
-                signal_message = check_pullback_buy_strategy(coin)
-                if signal_message:
-                    try:
-                        bot.send_message(chat_id=int(user_id), text=signal_message, parse_mode='Markdown')
-                        print(f">>> Sinyal BELI terkirim ke {user_id} untuk {coin}!")
-                    except Exception as e:
-                        print(f"Gagal mengirim pesan ke {user_id}: {e}")
-        
-        if strategies.get("breakdown_sell", {}).get("enabled", False):
-            for coin in watchlist:
-                signal_message = check_breakdown_sell_strategy(coin)
-                if signal_message:
-                    try:
-                        bot.send_message(chat_id=int(user_id), text=signal_message, parse_mode='Markdown')
-                        print(f">>> Sinyal JUAL terkirim ke {user_id} untuk {coin}!")
-                    except Exception as e:
-                        print(f"Gagal mengirim pesan ke {user_id}: {e}")
+    # Gabungkan semua watchlist menjadi satu set unik untuk dipindai
+    coins_to_scan = set(core_watchlist)
+    for user_id, data in user_data.items():
+        for coin in data.get("watchlist", []):
+            coins_to_scan.add(coin)
+
+    if not coins_to_scan:
+        print("Tidak ada koin untuk dipindai. Selesai.")
+        return
     
+    print(f"Memindai koin: {list(coins_to_scan)}")
+
+    for coin in coins_to_scan:
+        # 1. Cek Sinyal Kualitas Tinggi
+        signal_type, df = check_signal(coin)
+        if signal_type:
+            news_headlines = get_news_headlines(coin)
+            news_context = "Tidak ada berita signifikan."
+            if news_headlines: news_context = "Berita terbaru:\n- " + "\n- ".join(news_headlines)
+            
+            prompt_sentiment = f"Saya menemukan sinyal teknikal {signal_type} untuk {coin}. {news_context}. Berdasarkan berita ini, apakah sentimen pasar mendukung sinyal ini? Jawab 'YA' atau 'TIDAK'."
+            validation = get_gemini_analysis(prompt_sentiment)
+
+            if validation and "TIDAK" in validation.upper():
+                print(f"AI membatalkan sinyal {signal_type} untuk {coin} karena sentimen berita.")
+                continue
+
+            harga_saat_ini = df['close'].iloc[-1]
+            message_header = f"🎯 **SINYAL DITEMUKAN: Potensi {signal_type}**\n\n📈 **Aset**: `{coin}` (Timeframe: 4h)\n💰 **Harga**: `${harga_saat_ini:,.2f}`"
+            
+            for user_id, data in user_data.items():
+                is_in_watchlist = coin in data.get("watchlist", []) or coin in core_watchlist
+                strategy_name = "pullback_buy" if signal_type == "BUY" else "breakdown_sell"
+                if is_in_watchlist and data.get("strategies", {}).get(strategy_name, {}).get("signal_on", False):
+                    try:
+                        bot.send_message(chat_id=int(user_id), text=message_header, parse_mode='Markdown')
+                        print(f">>> Sinyal {signal_type} terkirim ke {user_id} untuk {coin}!")
+                    except Exception as e:
+                        print(f"Gagal mengirim sinyal ke {user_id}: {e}")
+
+        # 2. Cek Peringatan Dini
+        alert_type = check_alert(coin)
+        if alert_type:
+            direction = "BULLISH" if "BUY" in alert_type else "BEARISH"
+            message_alert = f"🔔 **PERINGATAN DINI: Potensi Pergerakan {direction}**\n\n**Aset**: `{coin}` (Timeframe: 4h)\n\n_Parameter sensitif mendeteksi momentum awal. Harap pantau lebih lanjut._"
+            
+            for user_id, data in user_data.items():
+                is_in_watchlist = coin in data.get("watchlist", []) or coin in core_watchlist
+                strategy_name = "pullback_buy" if "BUY" in alert_type else "breakdown_sell"
+                if is_in_watchlist and data.get("strategies", {}).get(strategy_name, {}).get("alert_on", False):
+                    try:
+                        bot.send_message(chat_id=int(user_id), text=message_alert, parse_mode='Markdown')
+                        print(f">>> Peringatan {direction} terkirim ke {user_id} untuk {coin}!")
+                    except Exception as e:
+                        print(f"Gagal mengirim peringatan ke {user_id}: {e}")
+
     print("Pemindai sinyal selesai.")
 
 if __name__ == "__main__":
