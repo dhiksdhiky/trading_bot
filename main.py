@@ -1,5 +1,5 @@
 # main.py
-# VERSI FINAL DENGAN SEMUA FITUR TERINTEGRASI (AI, STRATEGI GANDA, DLL)
+# VERSI DIRAMPINGKAN UNTUK PERSIAPAN FITUR MASA DEPAN
 import os
 import requests
 import ccxt
@@ -56,7 +56,6 @@ def run_web_server():
 
 # --- KONFIGURASI ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-CRYPTOCOMPARE_API_KEY = os.environ.get('CRYPTOCOMPARE_API_KEY') 
 
 # --- FUNGSI HELPER ---
 def get_gemini_analysis(prompt: str):
@@ -223,7 +222,7 @@ def generate_chart_and_caption(pair: str, timeframe: str):
 def start_command(update: Update, context: CallbackContext):
     text = (
         "👋 **Selamat Datang di Bot Sinyal Kripto v5 (AI Enhanced)!**\n\n"
-        "Analisis AI sekarang terintegrasi langsung di setiap perintah `/chart` dan `/analyze`.\n\n"
+        "Bot ini ditenagai oleh Gemini AI untuk analisis chart dan sinyal proaktif.\n\n"
         "Gunakan `/help` untuk melihat semua perintah."
     )
     update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
@@ -231,10 +230,7 @@ def start_command(update: Update, context: CallbackContext):
 def help_command(update: Update, context: CallbackContext):
     text = (
         "**Perintah yang Tersedia:**\n\n"
-        "**Analisis Manual:**\n"
-        "📈 `/chart <simbol> <tf>` - Analisis detail dengan AI\n"
-        "🔭 `/analyze <simbol>` - Analisis multi-timeframe dengan AI\n"
-        "📰 `/news [simbol]` - Berita umum atau spesifik\n\n"
+        "📈 `/chart <simbol> <tf>` - Analisis detail dengan AI\n\n"
         "**Watchlist (Wajib untuk Sinyal):**\n"
         "❤️ `/add <simbol>` - Tambah koin ke pantauan\n"
         "💔 `/remove <simbol>` - Hapus koin\n"
@@ -281,105 +277,7 @@ def chart_command(update: Update, context: CallbackContext):
         print(f"Error di chart_command: {e}")
         context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Terjadi kesalahan: {e}", parse_mode=ParseMode.MARKDOWN)
 
-def analyze_command(update: Update, context: CallbackContext):
-    if not context.args:
-        update.message.reply_text("Format: `/analyze <simbol>`")
-        return
-    symbol = context.args[0].upper()
-    pair = f"{symbol}/USDT"
-    timeframes = ['15m', '1h', '4h', '1d']
-    
-    wait_message = update.message.reply_text(f"🔬 Menganalisis `{symbol}` dengan AI...", parse_mode=ParseMode.MARKDOWN)
-    
-    summary_text = f"**Analisis Multi-Timeframe untuk {symbol}**\n\n"
-    exchange = ccxt.kucoin()
-    has_buy, has_sell = False, False
-    sentiment = get_fear_and_greed_index()
-    
-    technical_data_for_ai = ""
-
-    for tf in timeframes:
-        try:
-            ohlcv = exchange.fetch_ohlcv(pair, timeframe=tf, limit=100)
-            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df.set_index('timestamp', inplace=True)
-            df['ma9'] = ta.trend.sma_indicator(df['close'], window=9)
-            df['ma26'] = ta.trend.sma_indicator(df['close'], window=26)
-            df['rsi'] = ta.momentum.rsi(df['close'], window=14)
-            macd = ta.trend.MACD(df['close'])
-            df['macd'] = macd.macd()
-            df['macd_signal'] = macd.macd_signal()
-            bb = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
-            df['bb_high'] = bb.bollinger_hband()
-            df['bb_low'] = bb.bollinger_lband()
-            df.dropna(inplace=True)
-            
-            if len(df) < 2:
-                summary_text += f"`{tf}`: ⏳ Data tidak cukup.\n"
-                continue
-
-            analysis = analyze_indicators(df)
-            signal = determine_final_signal(analysis, sentiment)
-            
-            df_period = df.tail(24)
-            change_str = ""
-            if len(df_period) >= 2:
-                change_pct = ((df_period['close'].iloc[-1] - df_period['close'].iloc[0]) / df_period['close'].iloc[0]) * 100
-                change_str = f"({change_pct:+.1f}%)"
-
-            signal_emoji = "➡️"
-            if "BELI" in signal: signal_emoji, has_buy = "🟢", True
-            if "JUAL" in signal: signal_emoji, has_sell = "🔴", True
-
-            summary_text += f"`{tf}`: {signal_emoji} {analysis['ma']} {change_str}\n"
-            technical_data_for_ai += f"- Timeframe {tf}: Tren {analysis['ma']}, RSI {analysis['rsi']}, MACD {analysis['macd']}\n"
-        except Exception:
-            summary_text += f"`{tf}`: ❌ Gagal dimuat.\n"
-    
-    prompt = f"""
-    Anda adalah seorang analis teknikal kripto profesional. Berikan kesimpulan pasar secara umum untuk {symbol} (maksimal 2 kalimat) berdasarkan ringkasan data multi-timeframe berikut:
-    {technical_data_for_ai}
-    """
-    ai_summary = get_gemini_analysis(prompt)
-
-    final_verdict = "⚠️ **Kesimpulan: NETRAL / KONSOLIDASI**"
-    if has_buy and not has_sell: final_verdict = "✅ **Kesimpulan: CENDERUNG BULLISH**"
-    elif has_sell and not has_buy: final_verdict = "❌ **Kesimpulan: CENDERUNG BEARISH**"
-
-    summary_text += f"\n{final_verdict}\n\n**🧠 Analisis AI:**\n_{ai_summary}_\n\n*Sentimen Pasar Global: {sentiment['text']}*"
-    context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=summary_text, parse_mode=ParseMode.MARKDOWN)
-
-# --- HANDLER WATCHLIST, STRATEGI & BERITA ---
-def news_command(update: Update, context: CallbackContext):
-    base_url = f"https://min-api.cryptocompare.com/data/v2/news/?lang=EN&api_key={CRYPTOCOMPARE_API_KEY}"
-    
-    if not context.args:
-        topic = "umum"
-        url = base_url
-    else:
-        symbol = context.args[0].upper()
-        topic = f"`{symbol}`"
-        url = f"{base_url}&categories={symbol}"
-
-    update.message.reply_text(f"📰 Mencari berita {topic}...", parse_mode=ParseMode.MARKDOWN)
-    
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        news_data = response.json()['Data'][:3]
-        
-        if not news_data:
-            update.message.reply_text(f"Tidak ada berita yang ditemukan untuk {topic}.", parse_mode=ParseMode.MARKDOWN)
-            return
-            
-        for news in news_data:
-            text = f"**{news['title']}**\n\n_{news['source_info']['name']} - {datetime.fromtimestamp(news['published_on']).strftime('%d %b %Y')}_\n[Baca Selengkapnya]({news['url']})"
-            update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-            
-    except Exception as e:
-        update.message.reply_text(f"Gagal mengambil berita: {e}")
-
+# --- HANDLER WATCHLIST & STRATEGI ---
 def add_command(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     if not context.args:
@@ -514,8 +412,6 @@ def main_bot():
     dispatcher.add_handler(CommandHandler("start", start_command))
     dispatcher.add_handler(CommandHandler("help", help_command))
     dispatcher.add_handler(CommandHandler("chart", chart_command))
-    dispatcher.add_handler(CommandHandler("analyze", analyze_command))
-    dispatcher.add_handler(CommandHandler("news", news_command))
     dispatcher.add_handler(CommandHandler("add", add_command))
     dispatcher.add_handler(CommandHandler("remove", remove_command))
     dispatcher.add_handler(CommandHandler("watchlist", watchlist_command))
