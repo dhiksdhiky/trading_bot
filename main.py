@@ -1,5 +1,5 @@
 # main.py
-# VERSI DENGAN DETAIL INDIKATOR, HARGA IDR, DAN TOMBOL INFO
+# VERSI DENGAN SISTEM WATCHLIST HIBRIDA (INTI + PRIBADI)
 import os
 import requests
 import ccxt
@@ -20,9 +20,10 @@ app = Flask('')
 API_SECRET_KEY = os.environ.get("API_SECRET_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# --- KONFIGURASI PENYIMPANAN JSON ---
+# --- KONFIGURASI PENYIMPANAN & WATCHLIST ---
 DATA_DIR = "/app/data"
 DB_FILE = os.path.join(DATA_DIR, "user_data.json")
+CORE_WATCHLIST = ["BTC", "ETH", "SOL", "BNB", "DOGE", "AVAX", "XRP", "ADA", "DOT", "LINK"]
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -48,7 +49,7 @@ def get_user_data_api():
         return jsonify({"error": "Unauthorized"}), 401
     
     user_data = load_db()
-    return jsonify(user_data)
+    return jsonify({"users": user_data, "core_watchlist": CORE_WATCHLIST})
 
 def run_web_server():
   port = int(os.environ.get("PORT", 8080))
@@ -57,17 +58,15 @@ def run_web_server():
 # --- KONFIGURASI ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 
-# --- FUNGSI HELPER ---
+# --- FUNGSI HELPER (Tidak berubah) ---
 def get_gemini_analysis(prompt: str):
-    if not GEMINI_API_KEY:
-        return "Analisis AI tidak tersedia (API Key tidak dikonfigurasi)."
+    if not GEMINI_API_KEY: return "Analisis AI tidak tersedia."
     try:
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         response = requests.post(api_url, json=payload, timeout=45)
         response.raise_for_status()
-        result = response.json()
-        return result['candidates'][0]['content']['parts'][0]['text']
+        return response.json()['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
         print(f"Error saat berkomunikasi dengan Gemini: {e}")
         return "Gagal mendapatkan analisis dari AI."
@@ -82,21 +81,15 @@ def get_fear_and_greed_index():
         classification = data['value_classification']
         sentiment_score = 0
         emoji = "😐"
-        if "Extreme Fear" in classification or "Fear" in classification:
-            sentiment_score = 1
-            emoji = "😨"
-        elif "Extreme Greed" in classification or "Greed" in classification:
-            sentiment_score = -1
-            emoji = "🤑"
-        sentiment_text = f"{emoji} {classification} ({value})"
-        return {"status": "ok", "score": sentiment_score, "text": sentiment_text}
+        if "Extreme Fear" in classification or "Fear" in classification: sentiment_score, emoji = 1, "😨"
+        elif "Extreme Greed" in classification or "Greed" in classification: sentiment_score, emoji = -1, "🤑"
+        return {"status": "ok", "score": sentiment_score, "text": f"{emoji} {classification} ({value})"}
     except Exception as e:
         print(f"Error di get_fear_and_greed_index: {e}")
         return {"status": "error", "message": "Gagal memuat F&G Index."}
 
 def analyze_indicators(df: pd.DataFrame, symbol: str):
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
+    last, prev = df.iloc[-1], df.iloc[-2]
     analysis = {}
     if last['close'] > last['ma9'] and last['ma9'] > last['ma26']: analysis['ma'] = f"🟢 Bullish ({last['ma9']:.2f} > {last['ma26']:.2f})"
     elif last['close'] < last['ma9'] and last['ma9'] < last['ma26']: analysis['ma'] = f"🔴 Bearish ({last['ma9']:.2f} < {last['ma26']:.2f})"
@@ -104,23 +97,20 @@ def analyze_indicators(df: pd.DataFrame, symbol: str):
     if last['rsi'] > 70: analysis['rsi'] = f"🔴 Overbought ({last['rsi']:.2f})"
     elif last['rsi'] < 30: analysis['rsi'] = f"🟢 Oversold ({last['rsi']:.2f})"
     else: analysis['rsi'] = f"⚪ Netral ({last['rsi']:.2f})"
-    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']: analysis['macd'] = f"🟢 Golden Cross (MACD: {last['macd']:.2f}, Signal: {last['macd_signal']:.2f})"
-    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']: analysis['macd'] = f"🔴 Death Cross (MACD: {last['macd']:.2f}, Signal: {last['macd_signal']:.2f})"
+    if prev['macd'] < prev['macd_signal'] and last['macd'] > last['macd_signal']: analysis['macd'] = "🟢 Golden Cross"
+    elif prev['macd'] > prev['macd_signal'] and last['macd'] < last['macd_signal']: analysis['macd'] = "🔴 Death Cross"
     else: analysis['macd'] = "⚪ Netral"
     analysis['bb_score'] = 0
     if last['close'] < last['bb_low']:
-        analysis['bb'] = f"🟢 Di bawah Lower Band (Harga: {last['close']:.2f} < {last['bb_low']:.2f})"
+        analysis['bb'] = f"🟢 Di bawah Lower Band ({last['bb_low']:.2f})"
         analysis['bb_score'] = 1
     elif last['close'] > last['bb_high']:
-        analysis['bb'] = f"🔴 Di atas Upper Band (Harga: {last['close']:.2f} > {last['bb_high']:.2f})"
+        analysis['bb'] = f"🔴 Di atas Upper Band ({last['bb_high']:.2f})"
         analysis['bb_score'] = -1
-    else:
-        analysis['bb'] = "⚪ Di dalam Bands"
+    else: analysis['bb'] = "⚪ Di dalam Bands"
     avg_volume = df['volume'].rolling(window=20).mean().iloc[-1]
-    if last['volume'] > avg_volume * 1.75:
-        analysis['volume'] = f"🔥 Tinggi ({last['volume']:,.0f} {symbol})"
-    else:
-        analysis['volume'] = f"⚪ Normal ({last['volume']:,.0f} {symbol})"
+    if last['volume'] > avg_volume * 1.75: analysis['volume'] = f"🔥 Tinggi ({last['volume']:,.0f} {symbol})"
+    else: analysis['volume'] = f"⚪ Normal ({last['volume']:,.0f} {symbol})"
     return analysis
 
 def determine_final_signal(analysis: dict, sentiment: dict):
@@ -132,8 +122,7 @@ def determine_final_signal(analysis: dict, sentiment: dict):
     if "Oversold" in analysis['rsi']: score += 1
     if "Overbought" in analysis['rsi']: score -= 1
     score += analysis.get('bb_score', 0)
-    if sentiment.get('status') == 'ok':
-        score += sentiment.get('score', 0)
+    if sentiment.get('status') == 'ok': score += sentiment.get('score', 0)
     if score >= 2: return "🚨 SINYAL AKSI: BELI (BUY) 🚨"
     elif score <= -2: return "🚨 SINYAL AKSI: JUAL (SELL) 🚨"
     else: return "⚠️ SINYAL AKSI: TAHAN (HOLD) ⚠️"
@@ -149,16 +138,12 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     df['ma26'] = ta.trend.sma_indicator(df['close'], window=26)
     df['rsi'] = ta.momentum.rsi(df['close'], window=14)
     macd = ta.trend.MACD(df['close'])
-    df['macd'] = macd.macd()
-    df['macd_signal'] = macd.macd_signal()
-    df['macd_hist'] = macd.macd_diff()
+    df['macd'], df['macd_signal'], df['macd_hist'] = macd.macd(), macd.macd_signal(), macd.macd_diff()
     bb = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
-    df['bb_high'] = bb.bollinger_hband()
-    df['bb_low'] = bb.bollinger_lband()
+    df['bb_high'], df['bb_low'] = bb.bollinger_hband(), bb.bollinger_lband()
     df.dropna(inplace=True)
     
-    if len(df) < 2:
-        return None, "Gagal menganalisis, data tidak cukup setelah diproses.", None
+    if len(df) < 2: return None, "Gagal menganalisis, data tidak cukup.", None
 
     symbol = pair.split('/')[0]
     indicator_analysis = analyze_indicators(df, symbol)
@@ -166,28 +151,15 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     final_signal = determine_final_signal(indicator_analysis, sentiment_analysis)
     
     df_for_plot = df.tail(30)
-    
-    first_price = df_for_plot['close'].iloc[0]
-    last_price = df_for_plot['close'].iloc[-1]
-    change_pct = ((last_price - first_price) / first_price) * 100
+    change_pct = ((df_for_plot['close'].iloc[-1] - df_for_plot['close'].iloc[0]) / df_for_plot['close'].iloc[0]) * 100
     change_emoji = "📈" if change_pct >= 0 else "📉"
     change_str = f"{change_emoji} {change_pct:+.2f}%"
 
-    prompt = f"""
-    Anda adalah seorang analis teknikal kripto profesional. Berikan ringkasan analisis pasar yang singkat dan padat (maksimal 3 kalimat) dalam bahasa Indonesia berdasarkan data berikut untuk {pair} timeframe {timeframe}.
-    Data Indikator:
-    - Moving Average: {indicator_analysis['ma']}
-    - RSI: {indicator_analysis['rsi']}
-    - MACD: {indicator_analysis['macd']}
-    - Bollinger Bands: {indicator_analysis['bb']}
-    - Volume: {indicator_analysis['volume']}
-    Fokus pada kesimpulan utama dari kombinasi indikator ini.
-    """
+    prompt = f"Anda adalah seorang analis teknikal kripto profesional. Berikan ringkasan analisis pasar singkat (maksimal 3 kalimat) dalam bahasa Indonesia berdasarkan data ini untuk {pair} {timeframe}: MA: {indicator_analysis['ma']}, RSI: {indicator_analysis['rsi']}, MACD: {indicator_analysis['macd']}, Bollinger Bands: {indicator_analysis['bb']}, Volume: {indicator_analysis['volume']}. Fokus pada kesimpulan utama."
     ai_summary = get_gemini_analysis(prompt)
 
     mc = mpf.make_marketcolors(up='#41a35a', down='#d74a43', wick={'up':'#41a35a','down':'#d74a43'}, volume={'up':'#41a35a','down':'#d74a43'})
     s = mpf.make_mpf_style(marketcolors=mc, base_mpf_style='nightclouds', gridstyle='-')
-    
     addplots = [
         mpf.make_addplot(df_for_plot[['bb_high', 'bb_low']], color='gray', alpha=0.3),
         mpf.make_addplot(df_for_plot['rsi'], panel=1, color='purple', ylabel='RSI'),
@@ -200,12 +172,10 @@ def generate_chart_and_caption(pair: str, timeframe: str):
     harga_terkini_usd = df['close'].iloc[-1]
     harga_terkini_idr_str = "N/A"
     try:
-        exchange_idr = ccxt.indodax()
-        ticker_idr = exchange_idr.fetch_ticker('USDT/IDR')
+        ticker_idr = ccxt.indodax().fetch_ticker('USDT/IDR')
         harga_terkini_idr = harga_terkini_usd * ticker_idr['last']
         harga_terkini_idr_str = f"Rp {harga_terkini_idr:,.0f}"
-    except Exception as e:
-        print(f"Gagal mengambil harga IDR: {e}")
+    except Exception as e: print(f"Gagal mengambil harga IDR: {e}")
 
     waktu_sekarang = datetime.now(pytz.timezone('Asia/Jakarta')).strftime('%d %b %Y, %H:%M WIB')
     filename = f'analysis_{pair.replace("/", "")}_{timeframe}.png'
@@ -229,50 +199,40 @@ def generate_chart_and_caption(pair: str, timeframe: str):
 
 # --- HANDLER PERINTAH ---
 def start_command(update: Update, context: CallbackContext):
-    text = (
-        "👋 **Selamat Datang di Bot Sinyal Kripto v6!**\n\n"
-        "Analisis chart sekarang lebih detail dan informatif. Gunakan `/info` untuk belajar tentang indikator.\n\n"
-        "Gunakan `/help` untuk melihat semua perintah."
-    )
-    update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    update.message.reply_text("👋 **Selamat Datang di Bot Sinyal Hibrida!**\n\nBot ini memantau koin inti dan watchlist pribadi Anda, serta dapat memberikan Sinyal Eksekusi & Peringatan Dini.\n\nGunakan `/help` untuk melihat semua perintah.", parse_mode=ParseMode.MARKDOWN)
 
 def help_command(update: Update, context: CallbackContext):
     text = (
         "**Perintah yang Tersedia:**\n\n"
         "📈 `/chart <simbol>` - Analisis detail (default 4 jam)\n"
         "ℹ️ `/info` - Penjelasan singkat tentang indikator\n\n"
-        "**Watchlist (Wajib untuk Sinyal):**\n"
-        "❤️ `/add <simbol>` - Tambah koin ke pantauan\n"
-        "💔 `/remove <simbol>` - Hapus koin\n"
-        "📋 `/watchlist` - Lihat daftar pantauan\n\n"
+        "**Watchlist:**\n"
+        "❤️ `/add <simbol>` - Tambah koin ke pantauan pribadi\n"
+        "💔 `/remove <simbol>` - Hapus koin dari pantauan pribadi\n"
+        "📋 `/watchlist` - Lihat daftar pantauan Anda\n\n"
         "**Auto-Signal:**\n"
-        "🎯 `/strategy list` - Lihat strategi tersedia\n"
-        "✅ `/strategy toggle <nama>` - Aktifkan/nonaktifkan strategi"
+        "🎯 `/strategy list` - Lihat status notifikasi Anda\n"
+        "🔔 `/strategy toggle_alert <nama>` - Aktifkan/nonaktifkan Peringatan Dini\n"
+        "✅ `/strategy toggle_signal <nama>` - Aktifkan/nonaktifkan Sinyal Eksekusi"
     )
-    if update.callback_query:
-        update.callback_query.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
-    else:
-        update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    if update.callback_query: update.callback_query.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    else: update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 def info_command(update: Update, context: CallbackContext):
     text = (
         "**ℹ️ Penjelasan Singkat Indikator Teknikal**\n\n"
-        "1. **Moving Average (MA)**\n"
-        "Menunjukkan arah tren harga rata-rata. Jika MA cepat di atas MA lambat, tren cenderung naik (Bullish), dan sebaliknya.\n\n"
+        "1. **Moving Average (MA)**\nMenunjukkan arah tren harga rata-rata.\n\n"
         "2. **Relative Strength Index (RSI)**\n"
-        "Mengukur kecepatan perubahan harga (momentum). Nilai di atas 70 menandakan jenuh beli (Overbought), di bawah 30 menandakan jenuh jual (Oversold).\n\n"
+        "Mengukur momentum. Di atas 70 (Overbought), di bawah 30 (Oversold).\n\n"
         "3. **MACD**\n"
-        "Menunjukkan hubungan antara dua MA untuk mengukur momentum. 'Golden Cross' adalah sinyal beli kuat, 'Death Cross' adalah sinyal jual kuat.\n\n"
+        "Mengukur momentum tren. 'Golden Cross' sinyal beli, 'Death Cross' sinyal jual.\n\n"
         "4. **Bollinger Bands (BB)**\n"
-        "Mengukur volatilitas pasar. Harga yang keluar dari 'bands' (pita) menandakan pergerakan harga yang signifikan.\n\n"
+        "Mengukur volatilitas. Harga di luar pita menandakan pergerakan signifikan.\n\n"
         "5. **Volume**\n"
-        "Menunjukkan jumlah koin yang diperdagangkan. Volume yang tinggi saat harga bergerak mengkonfirmasi kekuatan tren tersebut."
+        "Jumlah koin yang diperdagangkan. Volume tinggi mengkonfirmasi tren."
     )
-    # Cek apakah ini dari tombol atau perintah
-    if update.callback_query:
-        update.callback_query.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
-    else:
-        update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    if update.callback_query: update.callback_query.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    else: update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 def chart_command(update: Update, context: CallbackContext):
     if len(context.args) != 1:
@@ -291,7 +251,6 @@ def chart_command(update: Update, context: CallbackContext):
             context.bot.edit_message_text(chat_id=update.message.chat_id, message_id=wait_message.message_id, text=f"Gagal: {caption}", parse_mode=ParseMode.MARKDOWN)
             return
 
-        # PEMBARUAN: Ganti tombol Bantuan menjadi Info Indikator
         keyboard = [
             [
                 InlineKeyboardButton("Refresh 🔃", callback_data=f"refresh_{pair}_{timeframe}"),
@@ -326,13 +285,15 @@ def add_command(update: Update, context: CallbackContext):
     db = load_db()
     if user_id not in db:
         db[user_id] = {"watchlist": [], "strategies": {}}
+    if "watchlist" not in db[user_id]:
+        db[user_id]["watchlist"] = []
     
     if symbol not in db[user_id]["watchlist"]:
         db[user_id]["watchlist"].append(symbol)
         save_db(db)
-        update.message.reply_text(f"✅ `{symbol}` ditambahkan ke watchlist.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text(f"✅ `{symbol}` ditambahkan ke watchlist pribadi.", parse_mode=ParseMode.MARKDOWN)
     else:
-        update.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist pribadi.", parse_mode=ParseMode.MARKDOWN)
 
 def remove_command(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
@@ -342,73 +303,88 @@ def remove_command(update: Update, context: CallbackContext):
     symbol = context.args[0].upper()
     
     db = load_db()
-    if user_id in db and symbol in db[user_id]["watchlist"]:
+    if user_id in db and symbol in db[user_id].get("watchlist", []):
         db[user_id]["watchlist"].remove(symbol)
         save_db(db)
-        update.message.reply_text(f"🗑️ `{symbol}` dihapus dari watchlist.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text(f"🗑️ `{symbol}` dihapus dari watchlist pribadi.", parse_mode=ParseMode.MARKDOWN)
     else:
-        update.message.reply_text(f"❌ `{symbol}` tidak ditemukan di watchlist.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text(f"❌ `{symbol}` tidak ditemukan di watchlist pribadi.", parse_mode=ParseMode.MARKDOWN)
 
 def watchlist_command(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     db = load_db()
-    if user_id in db and db[user_id].get("watchlist"):
-        coins = ", ".join([f"`{c}`" for c in db[user_id]["watchlist"]])
-        update.message.reply_text(f"❤️ **Watchlist Anda:**\n{coins}", parse_mode=ParseMode.MARKDOWN)
+    
+    text = f"❤️ **Watchlist Inti (Dipantau Otomatis):**\n"
+    text += ", ".join([f"`{c}`" for c in CORE_WATCHLIST])
+    
+    user_watchlist = db.get(user_id, {}).get("watchlist", [])
+    if user_watchlist:
+        text += "\n\n📋 **Watchlist Pribadi Anda:**\n"
+        text += ", ".join([f"`{c}`" for c in user_watchlist])
     else:
-        update.message.reply_text("🤷 Watchlist Anda kosong. Gunakan `/add <simbol>`.", parse_mode=ParseMode.MARKDOWN)
+        text += "\n\n🤷 Anda belum memiliki watchlist pribadi. Gunakan `/add <simbol>`."
+        
+    update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 def strategy_command(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     args = context.args
     AVAILABLE_STRATEGIES = {
-        "pullback_buy": "Mencari sinyal beli saat terjadi koreksi dalam tren naik.",
-        "breakdown_sell": "Mencari sinyal jual saat harga menembus support dalam tren turun."
+        "pullback_buy": "Sinyal Beli saat koreksi di tren naik.",
+        "breakdown_sell": "Sinyal Jual saat tembus support di tren turun."
     }
     
-    if not args or args[0] not in ['list', 'toggle']:
-        update.message.reply_text("Format salah. Gunakan `/strategy list` atau `/strategy toggle <nama>`.")
+    if not args or args[0] not in ['list', 'toggle_alert', 'toggle_signal']:
+        update.message.reply_text("Format salah. Gunakan `/strategy list`, `toggle_alert <nama>`, atau `toggle_signal <nama>`.")
         return
 
     sub_command = args[0]
     db = load_db()
 
+    if user_id not in db:
+        db[user_id] = {"watchlist": [], "strategies": {}}
+
     if sub_command == 'list':
-        text = "**Strategi yang Tersedia:**\n\n"
+        text = "**Status Notifikasi Strategi Anda:**\n\n"
         user_strategies = db.get(user_id, {}).get("strategies", {})
         for name, desc in AVAILABLE_STRATEGIES.items():
-            status = "✅ Aktif" if user_strategies.get(name, {}).get("enabled", False) else "❌ Nonaktif"
-            text += f"**{name}**\n_{desc}_\nStatus: {status}\n\n"
+            prefs = user_strategies.get(name, {})
+            alert_status = "✅ Aktif" if prefs.get("alert_on", False) else "❌ Nonaktif"
+            signal_status = "✅ Aktif" if prefs.get("signal_on", False) else "❌ Nonaktif"
+            text += f"**{name}**\n_{desc}_\n- Peringatan Dini: {alert_status}\n- Sinyal Eksekusi: {signal_status}\n\n"
         update.message.reply_text(text)
         return
 
-    if sub_command == 'toggle':
+    if sub_command in ['toggle_alert', 'toggle_signal']:
         if len(args) < 2 or args[1] not in AVAILABLE_STRATEGIES:
-            update.message.reply_text(f"Nama strategi tidak valid. Gunakan `/strategy list` untuk melihat pilihan.")
+            update.message.reply_text("Nama strategi tidak valid.")
             return
         
         strategy_name = args[1]
+        toggle_type = "alert_on" if sub_command == 'toggle_alert' else "signal_on"
         
-        if user_id not in db:
-            db[user_id] = {"watchlist": [], "strategies": {}}
-        if "strategies" not in db[user_id]:
-            db[user_id]["strategies"] = {}
+        if "strategies" not in db[user_id]: db[user_id]["strategies"] = {}
+        if strategy_name not in db[user_id]["strategies"]: db[user_id]["strategies"][strategy_name] = {}
             
-        current_status = db[user_id]["strategies"].get(strategy_name, {}).get("enabled", False)
-        db[user_id]["strategies"][strategy_name] = {"enabled": not current_status}
+        current_status = db[user_id]["strategies"][strategy_name].get(toggle_type, False)
+        db[user_id]["strategies"][strategy_name][toggle_type] = not current_status
         save_db(db)
         
+        type_text = "Peringatan Dini" if toggle_type == "alert_on" else "Sinyal Eksekusi"
         new_status = "diaktifkan" if not current_status else "dinonaktifkan"
-        update.message.reply_text(f"Strategi `{strategy_name}` berhasil {new_status}.", parse_mode=ParseMode.MARKDOWN)
+        update.message.reply_text(f"{type_text} untuk `{strategy_name}` berhasil {new_status}.", parse_mode=ParseMode.MARKDOWN)
 
 def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     data = query.data
     
-    # PEMBARUAN: Tangani callback untuk tombol Info
     if data == "show_info":
         info_command(update, context)
+        return
+    
+    if data == "show_help":
+        help_command(update, context)
         return
 
     action, params = data.split('_', 1)
@@ -439,15 +415,23 @@ def button_handler(update: Update, context: CallbackContext):
     elif action == "add":
         symbol = params
         user_id = str(query.from_user.id)
-        db = load_db()
-        if user_id not in db:
-            db[user_id] = {"watchlist": [], "strategies": {}}
-        if symbol not in db[user_id]["watchlist"]:
-            db[user_id]["watchlist"].append(symbol)
-            save_db(db)
-            query.message.reply_text(f"✅ `{symbol}` ditambahkan ke watchlist.", parse_mode=ParseMode.MARKDOWN)
-        else:
-            query.message.reply_text(f"⚠️ `{symbol}` sudah ada di watchlist.", parse_mode=ParseMode.MARKDOWN)
+        # Re-use add_command logic
+        class MockMessage:
+            def __init__(self, text):
+                self.text = text
+                self.from_user = query.from_user
+            def reply_text(self, text, parse_mode):
+                context.bot.send_message(chat_id=query.message.chat_id, text=text, parse_mode=parse_mode)
+
+        class MockUpdate:
+            def __init__(self, text):
+                self.effective_user = query.from_user
+                self.message = MockMessage(text)
+
+        mock_update = MockUpdate(f"/add {symbol}")
+        context.args = [symbol]
+        add_command(mock_update, context)
+
 
 # --- FUNGSI UTAMA BOT ---
 def main_bot():
@@ -468,7 +452,7 @@ def main_bot():
     dispatcher.add_handler(CommandHandler("strategy", strategy_command))
     dispatcher.add_handler(CallbackQueryHandler(button_handler))
     
-    print("Bot Sinyal Kripto (AI Enhanced) berhasil dijalankan...")
+    print("Bot Sinyal Hibrida berhasil dijalankan...")
     updater.start_polling()
     updater.idle()
 
